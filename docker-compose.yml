@@ -1,10 +1,27 @@
 services:
   mosquitto:
-    image: eclipse-mosquitto:2
+    # Digest fijado de eclipse-mosquitto:2 (re-verificar/actualizar con:
+    #   docker pull eclipse-mosquitto:2 && docker inspect --format='{{index .RepoDigests 0}}' eclipse-mosquitto:2)
+    image: eclipse-mosquitto:2@sha256:6f8d8a947c506f8a2290ec65cd4bd2bc7cb4d43fb5f6271f861cb013e2ef9797
     container_name: sgpmp-mosquitto
     ports:
       - "1883:1883"
       - "9001:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+    restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sgpmp-gateway
+    env_file:
+      - .env
+    environment:
+      MQTT_HOST: mosquitto
+    ports:
+      - "8000:8000"
+    depends_on:
+      - mosquitto
     restart: unless-stopped

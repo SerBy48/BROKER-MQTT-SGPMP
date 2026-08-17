@@ -94,7 +94,14 @@ cp .env.example .env
 
 ## Ejecución
 
+### Local (venv)
+
 ```bash
+# entorno virtual (evita instalar en el Python global)
+python -m venv .venv
+.venv\Scripts\activate        # Windows
+# source .venv/bin/activate   # Linux/Mac
+
 # dependencias
 pip install -e ".[dev]"
 
@@ -106,6 +113,16 @@ uvicorn app.main:app --reload
 # o
 python -m app.main
 ```
+
+### Docker (broker + gateway, entorno reproducible)
+
+```bash
+cp .env.example .env   # ajustar valores
+docker compose up -d --build
+```
+
+Levanta `mosquitto` y `gateway` (imágenes fijadas por digest, ver `docker-compose.yml`
+y `Dockerfile`). Las dependencias de Python quedan fijadas en `requirements.lock`.
 
 ## Integración con la base de datos
 
@@ -196,3 +213,8 @@ Pull Request y por la validación de criterios de aceptación de su RF.
 
 Ver `AGENTS.md` para las reglas de colaboración, la estrategia de ramas y las
 convenciones que debe respetar cualquier contribución (humana o asistida por IA).
+
+Formatos de validación del equipo:
+
+- [Anexo A — Validación de Criterios de Aceptación](docs/Anexo_A_Validacion_Criterios.md)
+- [Anexo B — Solicitud de Cambio](docs/Anexo_B_Solicitud_Cambio.md)
