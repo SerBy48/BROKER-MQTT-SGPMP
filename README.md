@@ -90,7 +90,12 @@ cp .env.example .env
 | `DATABASE_URL` | Conexión al PostgreSQL existente (no se migra) |
 | `MQTT_HOST` / `MQTT_PORT` | Broker Mosquitto |
 | `MQTT_TOPIC_PREFIX` | Prefijo de la convención de topics |
-| `API_TOKEN` | Token Bearer con el que se autentica el servidor web |
+| `MQTT_ACK_TIMEOUT_SECONDS` | Segundos que `/v1/commands` espera el ACK del dispositivo antes de responder `NO_CONF` (RF-23, default 30) |
+
+No hay `API_TOKEN` estático: `/v1/commands` y `/v1/devices` autentican el
+Bearer del servidor web contra `modulo1.credenciales_servicio`
+(`nombre_servicio='broker_mqtt'`, hash sha256 del token en `hash_valor`) —
+la misma base compartida, no un secreto propio de este servicio.
 
 ## Ejecución
 
@@ -130,10 +135,19 @@ SGPMP **no crea esquemas ni corre migraciones** (la base ya está versionada con
 Alembic en el proyecto principal). Consume:
 
 - **`modulo9`** (registro, solo lectura): `dispositivos_iot` (identidad por
-  `serial`), `sensores`, `variables_ambientales`, `configuraciones_remotas`.
+  `serial`), `sensores`, `variables_ambientales`. **`configuraciones_remotas`
+  ya no se lee ni se escribe desde acá** (RF-23) — esa tabla es propiedad
+  exclusiva del servidor web, que crea la fila `PENDIENTE` antes de llamar a
+  `/v1/commands` y la actualiza con el resultado (`APLICADA`/`NO_CONF`) que
+  esta API le devuelve en la misma respuesta HTTP. SGPMP solo consulta
+  `modulo3.estados_dispositivos_iot` para decidir si vale la pena esperar un
+  ACK antes de publicar.
 - **`modulo3`** (ingesta): invoca `fn_ingesta_telemetria(...)` para telemetría e
   inserta en `heartbeats` (dispara `fn_procesar_heartbeat`). Registra cada
-  paquete en `transmisiones_mqtt`.
+  paquete en `transmisiones_mqtt`. También se lee `estados_dispositivos_iot`
+  (solo lectura) para el precheck de `/v1/commands`.
+- **`modulo1`** (solo lectura): `credenciales_servicio`, para autenticar al
+  servidor web (ver sección de configuración).
 
 Los valores de enums de PostgreSQL están reflejados en `app/core/enums.py` y deben
 mantenerse en sincronía con la base.
@@ -189,19 +203,55 @@ Heartbeat (`.../heartbeat`):
 }
 ```
 
+ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo IoT):
+
+```json
+{
+  "tipo_mensaje": "ACK_CONFIGURACION",
+  "resultado": "OK"
+}
+```
+
+Si llega mientras `/v1/commands` está esperando el ACK de ese `serial`
+(dentro de `MQTT_ACK_TIMEOUT_SECONDS`), la request en curso responde
+`APLICADA`. Si llega tarde (ya expiró el timeout o no había ninguna request
+en curso), se loguea y se descarta — el reenvío automático de una
+configuración `PENDIENTE` que reconecta más tarde no está implementado en
+esta entrega (requeriría que SGPMP le avise al servidor web vía un webhook
+inverso, fuera de alcance de RF-23 en su primera entrega).
+
 ## API HTTPS
 
 | Método | Ruta | Descripción | Auth |
 |---|---|---|---|
 | `GET` | `/v1/healthz` | Salud del servicio | — |
-| `POST` | `/v1/commands` | Enviar comando a un dispositivo | Bearer |
+| `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) | Bearer |
 | `GET` | `/v1/devices` | Estado de dispositivos IoT | Bearer |
+
+`POST /v1/commands` es síncrono: si el dispositivo está `ACTIVO`
+(`modulo3.estados_dispositivos_iot`), publica el comando y espera hasta
+`MQTT_ACK_TIMEOUT_SECONDS` un ACK correlacionado por `serial` antes de
+responder. `origen` identifica el caso de uso que originó el comando —hoy
+solo `"configuracion"` existe de verdad, el campo queda reservado para que
+telemetría/predicción lo usen el día que también necesiten enviar comandos
+por este mismo punto de entrada.
 
 ```bash
 curl -X POST http://localhost:8000/v1/commands \
-  -H "Authorization: Bearer <API_TOKEN>" \
+  -H "Authorization: Bearer <TOKEN_DE_SERVICIO>" \
   -H "Content-Type: application/json" \
-  -d '{"serial": "IOT-EST01-HLA-001", "frecuencia_captura": 60, "intervalo_transmision": 300}'
+  -d '{"origen": "configuracion", "serial": "IOT-EST01-HLA-001", "frecuencia_captura": 60, "intervalo_transmision": 300}'
+```
+
+Respuestas posibles (siempre `200` si el request es válido — el resultado
+del intento de configuración va en el campo `estado` del body, no en el
+código HTTP; es el servidor web quien lo traduce a 200/202/504 hacia su
+propio cliente):
+
+```json
+{"serial": "IOT-EST01-HLA-001", "topic": null, "estado": "PENDIENTE", "mensaje": "Dispositivo offline. La configuración quedará pendiente hasta que reconecte."}
+{"serial": "IOT-EST01-HLA-001", "topic": "sgpmp/IOT-EST01-HLA-001/command", "estado": "APLICADA", "mensaje": "El dispositivo confirmó la recepción de la configuración."}
+{"serial": "IOT-EST01-HLA-001", "topic": "sgpmp/IOT-EST01-HLA-001/command", "estado": "NO_CONF", "mensaje": "El comando fue enviado pero el dispositivo no confirmó la recepción a tiempo."}
 ```
 
 ## Entorno de trabajo del equipo

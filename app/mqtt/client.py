@@ -34,7 +34,7 @@ class MqttGateway:
             port=self.settings.mqtt_port,
             username=self.settings.mqtt_username,
             password=self.settings.mqtt_password,
-            client_id=self.settings.mqtt_client_id,
+            identifier=self.settings.mqtt_client_id,
             tls_context=tls_context,
         )
 
