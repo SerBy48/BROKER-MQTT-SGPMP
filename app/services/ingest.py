@@ -13,6 +13,7 @@ from app.core.errors import (
 )
 from app.db.engine import async_session_factory
 from app.db.repositories import registry, telemetry as telemetry_repo
+from app.mqtt import correlacion
 from app.schemas import HeartbeatPayload, TelemetryPayload
 
 logger = logging.getLogger(__name__)
@@ -89,7 +90,24 @@ async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) ->
 
 
 async def ingest_status(serial: str, data: dict) -> None:
-    # TODO: mapear el ACK/estado del dispositivo a la transición de estado en
-    # modulo9.configuraciones_remotas (PENDIENTE -> APLICADA) y a
-    # modulo3.estados_dispositivos_iot según el contrato de status del equipo IoT.
+    """Procesa un mensaje del topic `<prefix>/<serial>/status`.
+
+    Contrato propuesto para el ACK de configuración (RF-23, confirmar con
+    equipo IoT cuando los topics estén cerrados):
+    ``{"tipo_mensaje": "ACK_CONFIGURACION", "resultado": "OK"}``.
+
+    Si hay una espera de comando pendiente para este `serial`
+    (dispatch_command la crea al publicar), se resuelve acá -- eso es lo que
+    permite que /v1/commands responda APLICADA antes de agotar el timeout.
+    No transiciona nada en modulo9.configuraciones_remotas: esa tabla es
+    propiedad del backend, que actualiza su propia fila con el resultado que
+    /v1/commands le devuelve en la misma respuesta HTTP.
+    """
     logger.info("Status recibido de %s: %s", serial, data)
+    if data.get("tipo_mensaje") == "ACK_CONFIGURACION" and data.get("resultado") == "OK":
+        resuelto = correlacion.resolver_ack(serial)
+        if not resuelto:
+            logger.info(
+                "ACK de %s sin request en espera (ya expiró o no había ninguna).",
+                serial,
+            )
