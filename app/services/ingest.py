@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.errors import (
     DeviceNotFoundError,
@@ -12,7 +12,8 @@ from app.core.errors import (
     VariableNotFoundError,
 )
 from app.db.engine import async_session_factory
-from app.db.repositories import registry, telemetry as telemetry_repo
+from app.db.repositories import registry
+from app.db.repositories import telemetry as telemetry_repo
 from app.mqtt import correlacion
 from app.schemas import HeartbeatPayload, TelemetryPayload
 
@@ -65,7 +66,7 @@ async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) ->
         if device_id is None:
             raise DeviceNotFoundError(serial)
 
-        fecha_registro = payload.fecha_registro or datetime.now(timezone.utc)
+        fecha_registro = payload.fecha_registro or datetime.now(UTC)
         heartbeat_id = await telemetry_repo.insert_heartbeat(
             session,
             device_id=device_id,

@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import asyncio
 
-_pending_acks: dict[str, "asyncio.Future[None]"] = {}
+_pending_acks: dict[str, asyncio.Future[None]] = {}
 
 
-def crear_espera(serial: str) -> "asyncio.Future[None]":
-    future: "asyncio.Future[None]" = asyncio.get_running_loop().create_future()
+def crear_espera(serial: str) -> asyncio.Future[None]:
+    future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
     _pending_acks[serial] = future
     return future
 

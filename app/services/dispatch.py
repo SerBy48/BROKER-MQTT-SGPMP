@@ -70,7 +70,7 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
             estado="APLICADA",
             mensaje="El dispositivo confirmó la recepción de la configuración.",
         )
-    except asyncio.TimeoutError:
+    except TimeoutError:
         logger.error(
             "Sin ACK de %s tras %ss.", request.serial, settings.mqtt_ack_timeout_seconds
         )
