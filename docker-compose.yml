@@ -3,10 +3,13 @@ services:
     # Digest fijado de eclipse-mosquitto:2 (re-verificar/actualizar con:
     #   docker pull eclipse-mosquitto:2 && docker inspect --format='{{index .RepoDigests 0}}' eclipse-mosquitto:2)
     image: eclipse-mosquitto:2@sha256:6f8d8a947c506f8a2290ec65cd4bd2bc7cb4d43fb5f6271f861cb013e2ef9797
-    container_name: sgpmp-mosquitto
+    # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
+    # este es el único servicio del broker que necesita puerto de host
+    # publicado explícitamente (pedir que lo habiliten en el firewall,
+    # igual que el 5447 del backend).
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
     restart: unless-stopped
@@ -15,13 +18,14 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: sgpmp-gateway
     env_file:
       - .env
     environment:
       MQTT_HOST: mosquitto
-    ports:
-      - "8000:8000"
+    # No se publica puerto de host: se enruta por dominio vía Traefik en
+    # Dokploy (configurar el dominio apuntando al puerto interno 8000).
+    expose:
+      - "8000"
     depends_on:
       - mosquitto
     restart: unless-stopped
