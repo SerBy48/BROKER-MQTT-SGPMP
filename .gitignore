@@ -3,6 +3,9 @@ __pycache__/
 *.pyo
 .env
 docker/passwd
+# Guías de conexión por ambiente para el equipo de IoT — contienen
+# credenciales reales, se entregan por canal privado, no se versionan.
+GUIA_CONEXION_IOT_*.md
 .venv/
 venv/
 env/
