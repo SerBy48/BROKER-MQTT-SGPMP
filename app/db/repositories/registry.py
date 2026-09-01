@@ -53,6 +53,21 @@ async def resolve_sensor_id(
     return row[0] if row else None
 
 
+async def resolve_device_state(session: AsyncSession, serial: str) -> str | None:
+    result = await session.execute(
+        text(
+            "SELECT e.estado_actual "
+            "FROM modulo9.dispositivos_iot d "
+            "JOIN modulo3.estados_dispositivos_iot e "
+            "  ON e.id_dispositivo_iot = d.id_dispositivo_iot "
+            "WHERE d.serial = :serial"
+        ),
+        {"serial": serial},
+    )
+    row = result.first()
+    return row[0] if row else None
+
+
 async def list_device_states(session: AsyncSession) -> list[dict]:
     result = await session.execute(
         text(
