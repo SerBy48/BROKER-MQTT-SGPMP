@@ -3,9 +3,13 @@ __pycache__/
 *.pyo
 .env
 docker/passwd
-# Guías de conexión por ambiente para el equipo de IoT — contienen
-# credenciales reales, se entregan por canal privado, no se versionan.
-GUIA_CONEXION_IOT_*.md
+# Guías de conexión rellenadas con credenciales reales de un ambiente
+# concreto (dev/test/prod) — se entregan por canal privado, no se
+# versionan. La plantilla sin valores reales, GUIA_CONEXION_IOT.md, sí se
+# versiona normalmente (no matchea este patrón).
+GUIA_CONEXION_IOT_DEV.md
+GUIA_CONEXION_IOT_TEST.md
+GUIA_CONEXION_IOT_PROD.md
 .venv/
 venv/
 env/
