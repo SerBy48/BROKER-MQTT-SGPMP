@@ -35,6 +35,9 @@ async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) ->
         if sensor_id is None:
             raise SensorNotFoundError(serial, payload.variable)
 
+        if payload.timestamp_envio is None:
+            payload = payload.model_copy(update={"timestamp_envio": payload.timestamp_captura})
+
         result = await telemetry_repo.ingesta_telemetria(
             session,
             device_id=device_id,

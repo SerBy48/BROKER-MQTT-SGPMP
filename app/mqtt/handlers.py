@@ -38,4 +38,6 @@ async def handle_message(topic: str, payload: bytes) -> None:
         else:
             logger.warning("Tipo de mensaje desconocido en topic %s", topic)
     except SgpmpError as exc:
-        logger.error("Error procesando mensaje en %s: %s", topic, exc)
+        logger.error("Error de dominio procesando mensaje en %s: %s", topic, exc)
+    except Exception:
+        logger.exception("Error inesperado procesando mensaje en %s", topic)

@@ -15,6 +15,7 @@ services:
       - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./docker/passwd:/mosquitto/config/passwd:ro
     restart: unless-stopped
 
   gateway:
