@@ -16,9 +16,17 @@ services:
     # servidor Dokploy compartido el 1883 ya lo ocupa el contenedor EMQX
     # de otro proyecto (host-wide, confirmado por inspección directa del
     # contenedor) — colisión real, no hipotética.
+    #
+    # OJO: la variable se llama MQTT_HOST_PORT, no MQTT_PORT — el gateway
+    # (app/config.py) también lee una env var MQTT_PORT, pero para el
+    # puerto INTERNO de conexión (mosquitto:1883, no cambia nunca). Si acá
+    # se usa el mismo nombre, Dokploy inyecta el valor del puerto de host
+    # (ej. 5449) también dentro del contenedor del gateway, que entonces
+    # intenta conectar a mosquitto:5449 (nada escucha ahí) en vez de
+    # mosquitto:1883 → "Connection refused" permanente. Ya pasó una vez.
     ports:
-      - "${MQTT_PORT:-1884}:1883"
-      - "${MQTT_WS_PORT:-9001}:9001"
+      - "${MQTT_HOST_PORT:-1884}:1883"
+      - "${MQTT_WS_HOST_PORT:-9001}:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       # Volumen nombrado en un directorio aparte (no /mosquitto/config,
@@ -38,6 +46,12 @@ services:
       - .env
     environment:
       MQTT_HOST: mosquitto
+      # Fijo, no viene de Dokploy: es el puerto INTERNO de mosquitto (nunca
+      # cambia), distinto de MQTT_HOST_PORT (el publicado al host). Ver
+      # nota en el servicio "mosquitto" de arriba — evita que un
+      # MQTT_PORT mal seteado en el panel de Dokploy rompa la conexión
+      # interna otra vez.
+      MQTT_PORT: 1883
     # No se publica puerto de host: se enruta por dominio vía Traefik en
     # Dokploy (configurar el dominio apuntando al puerto interno 8000).
     expose:
