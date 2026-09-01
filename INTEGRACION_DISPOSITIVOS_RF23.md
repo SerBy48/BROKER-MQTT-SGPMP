@@ -70,10 +70,32 @@ realmente van a enviar — es un cambio de una función, no de arquitectura.
 
 ---
 
+## Conexión y autenticación al broker
+
+Mosquitto ya no acepta conexiones anónimas (`allow_anonymous false`). El
+dispositivo necesita autenticarse con usuario/contraseña MQTT estándar al
+conectar (no es lo mismo que ningún token HTTP — es la credencial del
+protocolo MQTT en sí, `CONNECT` con `username`/`password`).
+
+| Dato | Valor |
+|---|---|
+| Host | *(entregado aparte según ambiente — dev/test/prod)* |
+| Puerto MQTT (TCP) | *(entregado aparte, ver tabla de variables más abajo)* |
+| Puerto MQTT (WebSocket) | *(entregado aparte)* |
+| Usuario | *(entregado aparte — no es `sgpmp_gateway`, ese es del gateway, no de los dispositivos)* |
+| Contraseña | *(entregado aparte)* |
+| TLS | No en este ambiente (dev) — sin cifrado en tránsito. Antes de producción hay que activar `MQTT_TLS`/certificados. |
+
+Es una única credencial **compartida por todos los dispositivos** (no hay
+usuario/contraseña por dispositivo individual) — el `serial` en el topic es
+lo que identifica a cada uno, no la credencial de conexión. Si se necesita
+revocar acceso a un dispositivo específico sin afectar al resto, avisen: hoy
+no está soportado (se rotaría la credencial compartida para todos).
+
 ## Qué NO tienen que hacer
 
-- No necesitan tocar autenticación ni nada de la base de datos — eso ya está
-  resuelto entre el broker y el backend.
+- No necesitan tocar nada de la base de datos — eso ya está resuelto entre el
+  broker y el backend.
 - No necesitan escribir nada en `modulo9.configuraciones_remotas` — esa tabla
   la maneja el backend exclusivamente.
 - No necesitan implementar el reenvío automático cuando un dispositivo estuvo
@@ -89,10 +111,15 @@ Mientras el firmware no esté listo, se puede simular el ACK manualmente
 (esto es lo que usamos para las pruebas):
 
 ```bash
-docker exec sgpmp-mosquitto mosquitto_pub -h localhost \
+docker exec <container_mosquitto> mosquitto_pub -h localhost \
+  -u sgpmp_devices -P '<MQTT_DEVICE_PASSWORD real>' \
   -t "sgpmp/<serial>/status" \
   -m '{"tipo_mensaje":"ACK_CONFIGURACION","resultado":"OK"}' -q 1
 ```
+
+(`<container_mosquitto>` es el nombre real del contenedor en ese ambiente —
+ya no es fijo, Dokploy lo genera automáticamente por proyecto/ambiente;
+consultarlo en el panel o con `docker ps`.)
 
 ## Configuración relevante del broker (por si cambia el ambiente)
 

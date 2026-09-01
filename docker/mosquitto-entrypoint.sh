@@ -1,6 +1,9 @@
 #!/bin/sh
 # Genera /mosquitto/config/passwd en cada arranque a partir de
-# MQTT_USERNAME/MQTT_PASSWORD (env vars de Dokploy) si todavía no existe.
+# MQTT_USERNAME/MQTT_PASSWORD (gateway) y, si están definidas,
+# MQTT_DEVICE_USERNAME/MQTT_DEVICE_PASSWORD (credencial compartida para los
+# dispositivos IoT — se conectan directo a Mosquitto, no pasan por el
+# gateway HTTP, así que necesitan su propio usuario MQTT).
 #
 # docker/passwd está en .gitignore a propósito (son credenciales, no se
 # versionan) — eso significa que en un clone nuevo (como el que hace
@@ -20,6 +23,13 @@ if [ ! -f "$PASSWD_FILE" ]; then
     exit 1
   fi
   mosquitto_passwd -b -c "$PASSWD_FILE" "$MQTT_USERNAME" "$MQTT_PASSWORD"
+
+  if [ -n "$MQTT_DEVICE_USERNAME" ] && [ -n "$MQTT_DEVICE_PASSWORD" ]; then
+    mosquitto_passwd -b "$PASSWD_FILE" "$MQTT_DEVICE_USERNAME" "$MQTT_DEVICE_PASSWORD"
+  else
+    echo "AVISO: MQTT_DEVICE_USERNAME/MQTT_DEVICE_PASSWORD no definidas — los dispositivos IoT no van a poder autenticarse contra Mosquitto." >&2
+  fi
+
   chown mosquitto:mosquitto "$PASSWD_FILE"
   chmod 0600 "$PASSWD_FILE"
 fi
