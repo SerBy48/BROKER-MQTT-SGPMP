@@ -6,9 +6,12 @@ services:
     # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
     # este es el único servicio del broker que necesita puerto de host
     # publicado explícitamente (pedir que lo habiliten en el firewall,
-    # igual que el 5447 del backend).
+    # igual que el 5447 del backend). Default 1884 (no 1883): en el
+    # servidor Dokploy compartido el 1883 ya lo ocupa el contenedor EMQX
+    # de otro proyecto (host-wide, confirmado por inspección directa del
+    # contenedor) — colisión real, no hipotética.
     ports:
-      - "${MQTT_PORT:-1883}:1883"
+      - "${MQTT_PORT:-1884}:1883"
       - "${MQTT_WS_PORT:-9001}:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
