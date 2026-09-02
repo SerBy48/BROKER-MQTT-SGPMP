@@ -17,21 +17,31 @@ set -e
 
 PASSWD_FILE="/mosquitto/secrets/passwd"
 
-if [ ! -f "$PASSWD_FILE" ]; then
-  if [ -z "$MQTT_USERNAME" ] || [ -z "$MQTT_PASSWORD" ]; then
-    echo "ERROR: MQTT_USERNAME/MQTT_PASSWORD no definidas — no se puede generar $PASSWD_FILE" >&2
-    exit 1
-  fi
-  mosquitto_passwd -b -c "$PASSWD_FILE" "$MQTT_USERNAME" "$MQTT_PASSWORD"
-
-  if [ -n "$MQTT_DEVICE_USERNAME" ] && [ -n "$MQTT_DEVICE_PASSWORD" ]; then
-    mosquitto_passwd -b "$PASSWD_FILE" "$MQTT_DEVICE_USERNAME" "$MQTT_DEVICE_PASSWORD"
-  else
-    echo "AVISO: MQTT_DEVICE_USERNAME/MQTT_DEVICE_PASSWORD no definidas — los dispositivos IoT no van a poder autenticarse contra Mosquitto." >&2
-  fi
-
-  chown mosquitto:mosquitto "$PASSWD_FILE"
-  chmod 0600 "$PASSWD_FILE"
+# "upsert", no "crear una vez": corre en CADA arranque, no solo cuando el
+# archivo no existe. Con el volumen persistente (mosquitto_secrets), un
+# passwd generado en un deploy viejo (ej. antes de que existiera
+# MQTT_DEVICE_USERNAME) nunca ganaba los usuarios/contraseñas agregados
+# después — "if [ ! -f ... ]" lo saltaba siempre. mosquitto_passwd -b sin
+# -c ya hace upsert (agrega si no está, actualiza si sí), así que esto
+# también aplica rotaciones de contraseña en cada redeploy, no solo altas.
+if [ -z "$MQTT_USERNAME" ] || [ -z "$MQTT_PASSWORD" ]; then
+  echo "ERROR: MQTT_USERNAME/MQTT_PASSWORD no definidas — no se puede generar $PASSWD_FILE" >&2
+  exit 1
 fi
+
+if [ ! -f "$PASSWD_FILE" ]; then
+  mosquitto_passwd -b -c "$PASSWD_FILE" "$MQTT_USERNAME" "$MQTT_PASSWORD"
+else
+  mosquitto_passwd -b "$PASSWD_FILE" "$MQTT_USERNAME" "$MQTT_PASSWORD"
+fi
+
+if [ -n "$MQTT_DEVICE_USERNAME" ] && [ -n "$MQTT_DEVICE_PASSWORD" ]; then
+  mosquitto_passwd -b "$PASSWD_FILE" "$MQTT_DEVICE_USERNAME" "$MQTT_DEVICE_PASSWORD"
+else
+  echo "AVISO: MQTT_DEVICE_USERNAME/MQTT_DEVICE_PASSWORD no definidas — los dispositivos IoT no van a poder autenticarse contra Mosquitto." >&2
+fi
+
+chown mosquitto:mosquitto "$PASSWD_FILE"
+chmod 0600 "$PASSWD_FILE"
 
 exec /docker-entrypoint.sh "$@"

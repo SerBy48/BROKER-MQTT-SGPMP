@@ -9,6 +9,10 @@ services:
     environment:
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # Credencial de los dispositivos IoT (usuario aparte del gateway) —
+      # sin esto el entrypoint nunca las recibe, aunque estén en Dokploy.
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD}
     # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
     # este es el único servicio del broker que necesita puerto de host
     # publicado explícitamente (pedir que lo habiliten en el firewall,
