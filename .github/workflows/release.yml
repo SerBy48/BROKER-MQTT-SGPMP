@@ -1,0 +1,67 @@
+name: Versionamiento automatizado
+
+# Mismo flujo ya validado en sgpmp-backend/SGPMP-FRONT-END-PWA: develop
+# publica release candidates (1.x.y-rc.N), main publica la version final
+# cuando Pruebas aprueba y se mergea develop -> main. Ver
+# docs-sgpmp/1-analisis/versionamiento/.
+#
+# OJO: la rama activa de este repo es "develop", no "dev" como en los
+# otros dos repos del proyecto.
+#
+# Ya existe un tag manual v0.1.0 en este repo, pero NO colisiona: al no
+# tener los metadatos internos que semantic-release usa para reconocer un
+# release, la herramienta lo ignora y calcula su primer release desde cero
+# como 1.0.0-rc.1 -- un numero distinto, sin choque. (Mismo comportamiento
+# que dejo un tag manual sin reconocer en sgpmp-backend, mismo diagnostico.)
+#
+# Token: develop tiene ruleset con PR obligatorio (igual que sgpmp-backend
+# y SGPMP-FRONT-END-PWA) -- el token automatico de Actions actua como
+# github-actions[bot], que no esta en el bypass del ruleset, asi que su
+# push siempre se rechaza con GH013 sin importar los permisos de este
+# workflow. Necesita un PAT real de una cuenta que SI este en el bypass,
+# guardado como el secret GH_TOKEN.
+on:
+  push:
+    branches: [main, develop]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # persist-credentials debe quedar en true (default): semantic-
+          # release/git hace un "git push" real, no una llamada API --
+          # necesita que checkout deje el token configurado como
+          # credencial de git.
+          token: ${{ secrets.GH_TOKEN }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Instalar dependencias de release
+        run: |
+          npm install --no-save \
+            semantic-release \
+            @semantic-release/commit-analyzer \
+            @semantic-release/release-notes-generator \
+            @semantic-release/changelog \
+            @semantic-release/exec \
+            @semantic-release/git \
+            @semantic-release/github \
+            conventional-changelog-conventionalcommits
+
+      - name: Ejecutar semantic-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        run: npx semantic-release
+
+      - name: Confirmar publicación
+        run: echo "Versionamiento completado. Ver CHANGELOG.md y docs/trazabilidad/TRAZABILIDAD_CAMBIOS.md actualizados en este mismo commit."
