@@ -1,3 +1,9 @@
+## [0.2.0-rc.2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.1...v0.2.0-rc.2) (2026-09-03)
+
+### Bug Fixes
+
+* **mosquitto:** MQTT_DEVICE_USERNAME/PASSWORD nunca llegaban al contenedor + entrypoint no era idempotente ([a36051f](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a36051f3a40082627e6f946b1cea0aee7de307f9))
+
 ## [0.2.0-rc.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.1.0...v0.2.0-rc.1) (2026-09-03)
 
 ### Features
