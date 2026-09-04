@@ -41,6 +41,13 @@ class MqttGateway:
     async def run(self) -> None:
         from app.mqtt.handlers import handle_message
 
+        logger.debug(
+            "Intentando conectar MQTT a %s:%s (client_id=%s, tls=%s)",
+            self.settings.mqtt_host,
+            self.settings.mqtt_port,
+            self.settings.mqtt_client_id,
+            self.settings.mqtt_tls,
+        )
         while True:
             try:
                 async with self._build_client() as client:
@@ -53,7 +60,13 @@ class MqttGateway:
                         self.settings.mqtt_topic_prefix,
                     )
                     async for message in client.messages:
-                        await handle_message(_topic_str(message.topic), message.payload)
+                        topic = _topic_str(message.topic)
+                        logger.debug(
+                            "Mensaje MQTT recibido topic=%s payload_bytes=%d",
+                            topic,
+                            len(message.payload),
+                        )
+                        await handle_message(topic, message.payload)
             except aiomqtt.MqttError as exc:
                 self._client = None
                 logger.error(

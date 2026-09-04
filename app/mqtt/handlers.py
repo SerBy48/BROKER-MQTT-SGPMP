@@ -28,6 +28,8 @@ async def handle_message(topic: str, payload: bytes) -> None:
         logger.error("Payload JSON inválido en topic %s", topic)
         return
 
+    logger.debug("Mensaje parseado: serial=%s tipo=%s payload=%s", serial, msg_type, data)
+
     try:
         if msg_type == settings.mqtt_topic_telemetry:
             await ingest.ingest_telemetry(serial, data, topic=topic)

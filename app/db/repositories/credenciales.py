@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 async def validar_token_servicio(
@@ -16,4 +20,6 @@ async def validar_token_servicio(
         ),
         {"nombre": nombre_servicio, "hash": hash_valor},
     )
-    return result.first() is not None
+    valido = result.first() is not None
+    logger.debug("Validación de credencial para %s: %s", nombre_servicio, valido)
+    return valido
