@@ -1,3 +1,9 @@
+## [0.2.0-rc.3](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.2...v0.2.0-rc.3) (2026-09-04)
+
+### Features
+
+* **logging:** logs JSON detallados a stdout (MQTT/BD/API) sin depender de .env ([cfd91b4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/cfd91b437532f1975a23399b6cf064f597fc1022))
+
 ## [0.2.0-rc.2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.1...v0.2.0-rc.2) (2026-09-03)
 
 ### Bug Fixes
