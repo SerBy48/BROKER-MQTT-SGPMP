@@ -19,6 +19,7 @@ def command_topic(serial: str) -> str:
 async def publish_command(serial: str, payload: dict, qos: int = 1) -> str:
     topic = command_topic(serial)
     data = json.dumps(payload).encode("utf-8")
+    logger.debug("Publicando comando topic=%s payload=%s qos=%d", topic, payload, qos)
     await mqtt_gateway.publish(topic, data, qos=qos)
     logger.info("Comando publicado en %s", topic)
     return topic

@@ -21,6 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) -> dict:
+    logger.debug("Ingestando telemetría: serial=%s topic=%s", serial, topic)
     payload = TelemetryPayload(**data)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, serial)
@@ -63,6 +64,7 @@ async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) ->
 
 
 async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) -> int:
+    logger.debug("Ingestando heartbeat: serial=%s topic=%s", serial, topic)
     payload = HeartbeatPayload(**data)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, serial)

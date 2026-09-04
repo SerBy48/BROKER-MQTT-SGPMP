@@ -24,6 +24,7 @@ _ESTADO_ALCANZABLE = "ACTIVO"
 
 
 async def dispatch_command(request: CommandRequest) -> CommandResponse:
+    logger.debug("Despachando comando: serial=%s", request.serial)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, request.serial)
         if device_id is None:

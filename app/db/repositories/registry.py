@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 async def resolve_device_id(session: AsyncSession, serial: str) -> int | None:
@@ -12,7 +16,12 @@ async def resolve_device_id(session: AsyncSession, serial: str) -> int | None:
         {"serial": serial},
     )
     row = result.first()
-    return row[0] if row else None
+    device_id = row[0] if row else None
+    if device_id is None:
+        logger.warning("Dispositivo no encontrado en modulo9: serial=%s", serial)
+    else:
+        logger.debug("Resuelto device_id=%s para serial=%s", device_id, serial)
+    return device_id
 
 
 async def resolve_variable_id(session: AsyncSession, nombre: str) -> int | None:
