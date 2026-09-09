@@ -15,9 +15,12 @@ services:
     # este es el único servicio del broker que necesita puerto de host
     # publicado explícitamente (pedir que lo habiliten en el firewall).
     # Puertos por defecto DISTINTOS a dev (1884/9001) para no colisionar en
-    # el mismo servidor compartido — 1883 ya está ocupado por el EMQX de
-    # otro proyecto (confirmado por inspección directa, ver nota en
-    # docker-compose.yml), así que ni dev ni test pueden usarlo.
+    # el mismo servidor compartido. Verificado en vivo vía docker.getContainers
+    # de Dokploy (2026-09-09), no solo por el comentario de docker-compose.yml:
+    # 1883 lo tiene publicado el contenedor "emqx" de otro proyecto (running),
+    # 1884/9001 los tiene publicados "sigab-brokerdev-jwjecq-mosquitto-1"
+    # (running) — ninguno de los dos queda disponible para test. 1885/9002
+    # confirmados libres en esa misma revisión.
     #
     # OJO: la variable se llama MQTT_HOST_PORT, no MQTT_PORT — ver la nota
     # completa en docker-compose.yml (mismo riesgo de conexión rota entre
