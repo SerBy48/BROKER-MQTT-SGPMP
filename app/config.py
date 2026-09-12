@@ -35,8 +35,11 @@ class Settings(BaseSettings):
     mqtt_topic_command: str = "command"
     mqtt_topic_status: str = "status"
 
+    # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
+    # de responder NO_CONF.
+    mqtt_ack_timeout_seconds: int = 30
+
     # API HTTPS
-    api_token: str
     api_host: str = "0.0.0.0"
     api_port: int = 8000
 

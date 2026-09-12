@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from app.core.errors import (
     DeviceNotFoundError,
@@ -12,13 +12,16 @@ from app.core.errors import (
     VariableNotFoundError,
 )
 from app.db.engine import async_session_factory
-from app.db.repositories import registry, telemetry as telemetry_repo
+from app.db.repositories import registry
+from app.db.repositories import telemetry as telemetry_repo
+from app.mqtt import correlacion
 from app.schemas import HeartbeatPayload, TelemetryPayload
 
 logger = logging.getLogger(__name__)
 
 
 async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) -> dict:
+    logger.debug("Ingestando telemetría: serial=%s topic=%s", serial, topic)
     payload = TelemetryPayload(**data)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, serial)
@@ -32,6 +35,9 @@ async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) ->
         sensor_id = await registry.resolve_sensor_id(session, device_id, payload.sensor)
         if sensor_id is None:
             raise SensorNotFoundError(serial, payload.variable)
+
+        if payload.timestamp_envio is None:
+            payload = payload.model_copy(update={"timestamp_envio": payload.timestamp_captura})
 
         result = await telemetry_repo.ingesta_telemetria(
             session,
@@ -58,13 +64,14 @@ async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) ->
 
 
 async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) -> int:
+    logger.debug("Ingestando heartbeat: serial=%s topic=%s", serial, topic)
     payload = HeartbeatPayload(**data)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, serial)
         if device_id is None:
             raise DeviceNotFoundError(serial)
 
-        fecha_registro = payload.fecha_registro or datetime.now(timezone.utc)
+        fecha_registro = payload.fecha_registro or datetime.now(UTC)
         heartbeat_id = await telemetry_repo.insert_heartbeat(
             session,
             device_id=device_id,
@@ -89,7 +96,24 @@ async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) ->
 
 
 async def ingest_status(serial: str, data: dict) -> None:
-    # TODO: mapear el ACK/estado del dispositivo a la transición de estado en
-    # modulo9.configuraciones_remotas (PENDIENTE -> APLICADA) y a
-    # modulo3.estados_dispositivos_iot según el contrato de status del equipo IoT.
+    """Procesa un mensaje del topic `<prefix>/<serial>/status`.
+
+    Contrato propuesto para el ACK de configuración (RF-23, confirmar con
+    equipo IoT cuando los topics estén cerrados):
+    ``{"tipo_mensaje": "ACK_CONFIGURACION", "resultado": "OK"}``.
+
+    Si hay una espera de comando pendiente para este `serial`
+    (dispatch_command la crea al publicar), se resuelve acá -- eso es lo que
+    permite que /v1/commands responda APLICADA antes de agotar el timeout.
+    No transiciona nada en modulo9.configuraciones_remotas: esa tabla es
+    propiedad del backend, que actualiza su propia fila con el resultado que
+    /v1/commands le devuelve en la misma respuesta HTTP.
+    """
     logger.info("Status recibido de %s: %s", serial, data)
+    if data.get("tipo_mensaje") == "ACK_CONFIGURACION" and data.get("resultado") == "OK":
+        resuelto = correlacion.resolver_ack(serial)
+        if not resuelto:
+            logger.info(
+                "ACK de %s sin request en espera (ya expiró o no había ninguna).",
+                serial,
+            )

@@ -1,10 +1,68 @@
 services:
   mosquitto:
-    image: eclipse-mosquitto:2
-    container_name: sgpmp-mosquitto
+    # Build en vez de "image:" directo: necesita el entrypoint que genera
+    # docker/passwd al arrancar (ver Dockerfile.mosquitto). El digest de
+    # eclipse-mosquitto:2 base sigue fijado ahí mismo.
+    build:
+      context: .
+      dockerfile: Dockerfile.mosquitto
+    environment:
+      MQTT_USERNAME: ${MQTT_USERNAME}
+      MQTT_PASSWORD: ${MQTT_PASSWORD}
+      # Credencial de los dispositivos IoT (usuario aparte del gateway) —
+      # sin esto el entrypoint nunca las recibe, aunque estén en Dokploy.
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD}
+    # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
+    # este es el único servicio del broker que necesita puerto de host
+    # publicado explícitamente (pedir que lo habiliten en el firewall,
+    # igual que el 5447 del backend). Default 1884 (no 1883): en el
+    # servidor Dokploy compartido el 1883 ya lo ocupa el contenedor EMQX
+    # de otro proyecto (host-wide, confirmado por inspección directa del
+    # contenedor) — colisión real, no hipotética.
+    #
+    # OJO: la variable se llama MQTT_HOST_PORT, no MQTT_PORT — el gateway
+    # (app/config.py) también lee una env var MQTT_PORT, pero para el
+    # puerto INTERNO de conexión (mosquitto:1883, no cambia nunca). Si acá
+    # se usa el mismo nombre, Dokploy inyecta el valor del puerto de host
+    # (ej. 5449) también dentro del contenedor del gateway, que entonces
+    # intenta conectar a mosquitto:5449 (nada escucha ahí) en vez de
+    # mosquitto:1883 → "Connection refused" permanente. Ya pasó una vez.
     ports:
-      - "1883:1883"
-      - "9001:9001"
+      - "${MQTT_HOST_PORT:-1884}:1883"
+      - "${MQTT_WS_HOST_PORT:-9001}:9001"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Volumen nombrado en un directorio aparte (no /mosquitto/config,
+      # que ya tiene el bind mount de arriba): ./docker/passwd está
+      # gitignoreado y no existe en un clone nuevo, así que el entrypoint
+      # lo genera dentro de este volumen en el primer arranque y persiste
+      # entre reinicios/redeploys. mosquitto.conf apunta su password_file
+      # acá (ver docker/mosquitto.conf).
+      - mosquitto_secrets:/mosquitto/secrets
     restart: unless-stopped
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    environment:
+      MQTT_HOST: mosquitto
+      # Fijo, no viene de Dokploy: es el puerto INTERNO de mosquitto (nunca
+      # cambia), distinto de MQTT_HOST_PORT (el publicado al host). Ver
+      # nota en el servicio "mosquitto" de arriba — evita que un
+      # MQTT_PORT mal seteado en el panel de Dokploy rompa la conexión
+      # interna otra vez.
+      MQTT_PORT: 1883
+    # No se publica puerto de host: se enruta por dominio vía Traefik en
+    # Dokploy (configurar el dominio apuntando al puerto interno 8000).
+    expose:
+      - "8000"
+    depends_on:
+      - mosquitto
+    restart: unless-stopped
+
+volumes:
+  mosquitto_secrets:

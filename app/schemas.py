@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,8 +58,16 @@ class HeartbeatPayload(BaseModel):
 
 
 class CommandRequest(BaseModel):
-    """Comando enviado por el servidor web para reconfigurar un dispositivo."""
+    """Comando enviado por el servidor web para reconfigurar un dispositivo.
 
+    `origen` identifica qué caso de uso del backend originó el comando.
+    Hoy solo existe "configuracion" (RF-23); se deja como Literal para poder
+    agregar "telemetria"/"prediccion" el día que esos flujos envíen comandos
+    reales por este mismo punto de entrada — no se construye nada de eso
+    todavía.
+    """
+
+    origen: Literal["configuracion"]
     serial: str
     frecuencia_captura: int = Field(gt=0)
     intervalo_transmision: int = Field(gt=0)
@@ -67,6 +75,6 @@ class CommandRequest(BaseModel):
 
 class CommandResponse(BaseModel):
     serial: str
-    topic: str
-    estado: str = "PENDIENTE"
-    id_configuracion_remota: int | None = None
+    topic: str | None = None
+    estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
+    mensaje: str
