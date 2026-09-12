@@ -1,0 +1,360 @@
+# ==============================================================
+# SGPMP - Broker AIoT - Ambiente PROD
+# ==============================================================
+# Derivado de docker-compose.yml (el de DEV), que es la fuente de verdad del
+# stack. Cada diferencia con DEV es deliberada y esta explicada en el
+# comentario que la acompana.
+#
+# No se declara `version:`: es obsoleta en Compose V2 y solo genera una
+# advertencia.
+#
+# Sintaxis ${VARIABLE:?mensaje} (adoptada del compose de TEST): hace que
+# `docker compose config` falle de forma legible cuando falta una variable
+# obligatoria, en vez de levantar un contenedor mal configurado.
+#
+# Este stack NO levanta base de datos propia: el gateway se conecta a la misma
+# PostgreSQL que usa sgpmp-backend, sobre los esquemas modulo3 y modulo9.
+#
+# Prerrequisitos de despliegue:
+#   1. La red `sgpmp-network` es externa y debe existir antes de levantar el
+#      stack -> docker network create sgpmp-network
+#      Es la misma red que declara sgpmp-backend/docker-compose.prod.yml.
+#   2. El stack del backend (y por tanto su PostgreSQL) debe estar levantado y
+#      conectado a esa red.
+#   3. Los puertos MQTT publicados (MQTT_HOST_PORT / MQTT_WS_HOST_PORT) deben
+#      estar abiertos en el firewall del servidor. MQTT no es HTTP: Traefik no
+#      lo enruta por dominio.
+# ==============================================================
+
+# Nombre de proyecto explicito: sin esto Compose lo deriva del nombre del
+# directorio, que en el host compartido de Dokploy no es estable ni unico.
+# Se usa el prefijo `sgpmp-` (no `sigab-`, el del compose de TEST de este
+# repositorio) para que los tres artefactos de PROD que recibe Despliegue
+# -backend, frontend y broker- sean consistentes entre si. La divergencia de
+# nomenclatura queda anotada en el reporte como punto para el lider de
+# Implementacion.
+name: sgpmp-broker-prod
+
+services:
+  mosquitto:
+    # Build en vez de "image:" directo: necesita el entrypoint que genera el
+    # archivo de contrasenas al arrancar (ver Dockerfile.mosquitto). El digest
+    # de eclipse-mosquitto:2 base sigue fijado ahi mismo. Ni el Dockerfile ni
+    # docker/mosquitto.conf ni docker/mosquitto-entrypoint.sh se modifican
+    # para PROD: se despliega exactamente la misma imagen que se valido.
+    build:
+      context: .
+      dockerfile: Dockerfile.mosquitto
+    environment:
+      # Credencial del GATEWAY. Es la misma que recibe el servicio `gateway`
+      # mas abajo: las dos puntas tienen que coincidir.
+      MQTT_USERNAME: ${MQTT_USERNAME:?MQTT_USERNAME es obligatoria en PROD (credencial del gateway, la provee AIoT)}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD es obligatoria en PROD (credencial del gateway, la provee AIoT)}
+      # Credencial COMPARTIDA de los dispositivos de campo, usuario aparte del
+      # gateway. El compose de TEST de este repositorio NO las pasa, pese a
+      # que develop las agrego el 1 de septiembre (commit a36051f,
+      # "MQTT_DEVICE_USERNAME/PASSWORD nunca llegaban al contenedor").
+      # Consecuencia en TEST: el entrypoint nunca crea el segundo usuario y,
+      # con `allow_anonymous false` en docker/mosquitto.conf, NINGUN
+      # dispositivo puede autenticarse contra ese broker; solo el gateway.
+      # Aqui se pasan las cuatro a proposito. No replicar la omision.
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME:?MQTT_DEVICE_USERNAME es obligatoria en PROD (credencial de los dispositivos, la provee AIoT)}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD:?MQTT_DEVICE_PASSWORD es obligatoria en PROD (credencial de los dispositivos, la provee AIoT)}
+    # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, asi que
+    # este es el unico servicio del stack que necesita puerto de host
+    # publicado explicitamente. Pedir que lo habiliten en el firewall.
+    #
+    # SIN valor por defecto, a diferencia de DEV (1884/9001) y TEST
+    # (1885/9002): el puerto de PROD esta pendiente de confirmacion por AIoT y
+    # Despliegue, y un default silencioso llevaria a desplegar con un puerto
+    # que nadie acordo. El 1883 estandar NO esta disponible en el servidor
+    # compartido: lo ocupa el contenedor EMQX de otro proyecto (verificado en
+    # vivo, ver el comentario del compose de TEST).
+    #
+    # Publicar puertos NO depende de estar en la red compartida: mosquitto
+    # vive solo en `broker-interna` (ver la seccion `networks` al final) y aun
+    # asi los dispositivos lo alcanzan por MQTT_HOST_PORT. El mapeo de puertos
+    # es independiente de las redes a las que se une el contenedor.
+    #
+    # OJO: la variable se llama MQTT_HOST_PORT, no MQTT_PORT. El gateway
+    # (app/config.py) tambien lee una env var MQTT_PORT, pero para el puerto
+    # INTERNO de conexion (mosquitto:1883, no cambia nunca). Si aca se usa el
+    # mismo nombre, Dokploy inyecta el valor del puerto de host tambien dentro
+    # del contenedor del gateway, que entonces intenta conectar a
+    # mosquitto:<puerto publicado> -donde no escucha nada- en vez de
+    # mosquitto:1883, y produce un "Connection refused" permanente. Ya paso
+    # una vez.
+    ports:
+      - "${MQTT_HOST_PORT:?MQTT_HOST_PORT es obligatoria en PROD (puerto MQTT publicado al host, pendiente de confirmar por AIoT y Despliegue)}:1883"
+      - "${MQTT_WS_HOST_PORT:?MQTT_WS_HOST_PORT es obligatoria en PROD (puerto WebSocket publicado al host, pendiente de confirmar por AIoT y Despliegue)}:9001"
+      # TLS, PREPARADO Y DESACTIVADO. Ver el bloque de abajo antes de
+      # descomentar:
+      # - "${MQTT_TLS_HOST_PORT:-8883}:8883"
+    volumes:
+      - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Volumen nombrado en un directorio aparte (no /mosquitto/config, que ya
+      # tiene el bind mount de arriba): docker/passwd esta gitignoreado y no
+      # existe en un clone nuevo, asi que el entrypoint genera el archivo de
+      # contrasenas dentro de este volumen en el primer arranque y persiste
+      # entre reinicios y redeploys. docker/mosquitto.conf apunta su
+      # password_file aca.
+      - mosquitto_secrets_prod:/mosquitto/secrets
+      # TLS, desactivado: certificados en solo lectura, nunca versionados.
+      # - ./docker/certs:/mosquitto/certs:ro
+    #
+    # ------------------------------------------------------------------
+    # TLS: preparado, no habilitado.
+    # ------------------------------------------------------------------
+    # docker/mosquitto.conf declara hoy dos listeners EN CLARO (1883 y 9001),
+    # ambos con `allow_anonymous false` y archivo de contrasenas. Hay
+    # autenticacion, pero NO cifrado: las credenciales de los dispositivos
+    # viajan en texto plano. PROD deberia exigir TLS, pero el mecanismo esta
+    # pendiente de definicion por AIoT (hay tres caminos sobre la mesa:
+    # certificado de Let's Encrypt emitido aparte, CA privada con el
+    # certificado embebido en el firmware, o terminacion TLS en un router TCP
+    # de Traefik) y ninguno esta decidido.
+    #
+    # Para activarlo hacen falta CUATRO cosas, y ninguna se resuelve solo en
+    # este archivo:
+    #   1) docker/mosquitto.conf: agregar un listener nuevo (`listener 8883` +
+    #      `cafile`/`certfile`/`keyfile` + `allow_anonymous false` +
+    #      `password_file /mosquitto/secrets/passwd`). Ese archivo pertenece a
+    #      AIoT y no se modifica desde este lado.
+    #   2) Certificados reales en ./docker/certs, que hoy no existe. La clave
+    #      privada debe quedar legible por el usuario `mosquitto`, al que el
+    #      proceso baja privilegios tras arrancar.
+    #   3) Abrir MQTT_TLS_HOST_PORT en el firewall del host, igual que
+    #      MQTT_HOST_PORT.
+    #   4) Firmware de los dispositivos: apuntar al puerto TLS y confiar en la
+    #      CA elegida.
+    # El gateway NO cambia: MQTT_TLS sigue en false porque habla con
+    # mosquitto:1883 por la red interna del stack; el cifrado es para los
+    # dispositivos que llegan de afuera.
+    #
+    # Se deja COMENTADO a proposito y no activo: ./docker/certs no existe y
+    # `docker compose up` crearia ahi un directorio vacio propiedad de root,
+    # ensuciando el arbol de trabajo durante la validacion.
+    # ------------------------------------------------------------------
+    #
+    # Healthcheck: se AUTENTICA, obligatoriamente. Con `allow_anonymous false`
+    # una comprobacion sin credenciales no puede ni conectarse, asi que
+    # tendria que usar las del gateway de todas formas.
+    #   - `mosquitto_sub -E` (no `mosquitto_pub`): -E sale en cuanto el broker
+    #     confirma la suscripcion, asi que prueba el camino completo que usa
+    #     el gateway -TCP + CONNACK + autenticacion + SUBACK- sin escribir
+    #     nada en el broker. Un `pub` inyectaria un mensaje cada 30s para
+    #     siempre.
+    #   - `$$` y no `$`: escapa la interpolacion de Compose para que la
+    #     expansion ocurra dentro del contenedor, contra el `environment` de
+    #     arriba. Ademas evita que la contrasena quede escrita en la
+    #     definicion del healthcheck que muestra `docker inspect`.
+    #   - `127.0.0.1` y no `localhost`: en el Brief 2 el healthcheck del
+    #     frontend fallaba con el sitio sirviendo un 200 perfecto porque
+    #     `localhost` resolvia primero a ::1 y el servidor solo escuchaba en
+    #     IPv4. Mismo criterio aqui.
+    healthcheck:
+      test: ["CMD-SHELL", 'mosquitto_sub -h 127.0.0.1 -p 1883 -u "$$MQTT_USERNAME" -P "$$MQTT_PASSWORD" -t healthcheck -E']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # El entrypoint solo corre dos `mosquitto_passwd -b` (milisegundos) y
+      # hace exec del broker, que abre el socket enseguida. 10s ya es holgado.
+      start_period: 10s
+    # `always` y no `unless-stopped`: la diferencia importa tras un reboot del
+    # servidor. `unless-stopped` NO vuelve a levantar el contenedor si habia
+    # quedado detenido manualmente antes del reinicio; `always` si.
+    restart: always
+    # Compose V2 honra deploy.resources.limits fuera de Swarm. Mosquitto es un
+    # proceso liviano de C; 256m le sobran y acotan el impacto sobre el resto
+    # del host compartido. NO se declara deploy.restart_policy: solo aplica en
+    # Swarm, `docker compose up` lo ignora y duplicaria la intencion de
+    # `restart`.
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+    # Rotacion de logs: sin esto el archivo json-file crece sin limite y
+    # termina llenando el disco del servidor. Mosquitto registra tres lineas
+    # por cada conexion, incluidas las del propio healthcheck, asi que aca la
+    # rotacion no es teorica.
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Solo la red interna del stack. Deliberado: nadie fuera de este stack
+    # necesita alcanzar el broker por red interna -los dispositivos llegan por
+    # el puerto publicado-, asi que no se expone en la red compartida con el
+    # backend.
+    networks:
+      - broker-interna
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    # SIN `env_file: .env`, a diferencia de DEV y TEST, que inyectan el
+    # archivo completo al contenedor. En PROD no sirve por tres razones:
+    #   1. Compose falla si el archivo no existe, y en Dokploy las variables
+    #      las inyecta la plataforma, no un archivo del repositorio.
+    #   2. La enumeracion explicita es lo unico que permite usar `:?` y que
+    #      `docker compose config` detecte una variable faltante ANTES de
+    #      levantar nada.
+    #   3. Deja por escrito el contrato de configuracion del servicio, que es
+    #      precisamente lo que se le entrega a Despliegue.
+    # Mismo criterio que se aplico al backend.
+    environment:
+      # Se compone aqui a partir de sus cuatro partes, en vez de pedir una
+      # DATABASE_URL entera: asi cada pieza se valida por separado y la
+      # contrasena no viaja como parte de una URL en el panel de Dokploy.
+      #
+      # El esquema DEBE ser postgresql+asyncpg://. app/config.py declara
+      # database_url como un str pelado, sin normalizar: un `postgresql://` a
+      # secas (lo que suelen entregar los paneles de base de datos) llega tal
+      # cual a create_async_engine, que revienta con "The asyncio extension
+      # requires an async driver" en tiempo de IMPORT, antes de que la app
+      # pueda servir siquiera /v1/healthz.
+      #
+      # DB_HOST debe coincidir EXACTAMENTE con el container_name del servicio
+      # de base de datos del stack del backend, que alli se define como
+      # `${POSTGRES_DB}-db`. El gateway lo alcanza por `sgpmp-network` usando
+      # el puerto INTERNO 5432, nunca el publicado. Esta es la correccion del
+      # incidente del 7 de septiembre: el gateway devolvia 500 en DEV con
+      # `socket.gaierror: Temporary failure in name resolution` porque su
+      # DATABASE_URL apuntaba a un hostname de otra red. No copiar el patron
+      # host:puerto-publicado entre stacks.
+      DATABASE_URL: postgresql+asyncpg://${DB_IOT_USER:?DB_IOT_USER es obligatoria en PROD (rol member_iot, lo provee el DBA)}:${DB_IOT_PASSWORD:?DB_IOT_PASSWORD es obligatoria en PROD (la provee el DBA)}@${DB_HOST:?DB_HOST es obligatoria en PROD (container_name del PostgreSQL del backend, sin puerto)}:5432/${DB_NAME:?DB_NAME es obligatoria en PROD (nombre de la base del backend)}
+      DB_SCHEMA_INGEST: ${DB_SCHEMA_INGEST:-modulo3}
+      DB_SCHEMA_REGISTRY: ${DB_SCHEMA_REGISTRY:-modulo9}
+      # Fijos, no vienen de Dokploy: son el hostname y el puerto INTERNOS de
+      # mosquitto dentro de `broker-interna`. MQTT_PORT no es MQTT_HOST_PORT
+      # -ver la nota completa en el servicio `mosquitto` de arriba-. Dejarlo
+      # parametrizable es exactamente lo que rompio la conexion interna una
+      # vez.
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      # La misma credencial que recibe mosquitto. Si las dos no coinciden, el
+      # gateway se queda en el bucle de reconexion sin ingestar nada.
+      MQTT_USERNAME: ${MQTT_USERNAME:?MQTT_USERNAME es obligatoria en PROD (credencial del gateway, la provee AIoT)}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD es obligatoria en PROD (credencial del gateway, la provee AIoT)}
+      # ADVERTENCIA: dejar en false. El gateway habla con mosquitto:1883 por
+      # la red interna, que es un listener EN CLARO. Con MQTT_TLS=true,
+      # app/mqtt/client.py envuelve el socket en un contexto SSL contra ese
+      # listener, el handshake falla, aiomqtt.MqttError se captura y el bucle
+      # reintenta cada MQTT_RECONNECT_DELAY segundos -mientras /v1/healthz
+      # sigue devolviendo 200-. El contenedor queda `healthy` sin ingestar
+      # nada. Se pasa a true solo si algun dia el gateway habla TLS contra un
+      # broker externo, no por habilitar TLS para los dispositivos.
+      MQTT_TLS: ${MQTT_TLS:-false}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-sgpmp}
+      MQTT_RECONNECT_DELAY: ${MQTT_RECONNECT_DELAY:-5}
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-sgpmp}
+      MQTT_TOPIC_TELEMETRY: ${MQTT_TOPIC_TELEMETRY:-telemetry}
+      MQTT_TOPIC_HEARTBEAT: ${MQTT_TOPIC_HEARTBEAT:-heartbeat}
+      MQTT_TOPIC_COMMAND: ${MQTT_TOPIC_COMMAND:-command}
+      MQTT_TOPIC_STATUS: ${MQTT_TOPIC_STATUS:-status}
+      # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
+      # de responder NO_CONF. Es contrato con el backend; cambiarlo aqui sin
+      # coordinarlo alli desalinea los dos timeouts.
+      MQTT_ACK_TIMEOUT_SECONDS: ${MQTT_ACK_TIMEOUT_SECONDS:-30}
+      API_HOST: ${API_HOST:-0.0.0.0}
+      API_PORT: ${API_PORT:-8000}
+    # No se publica puerto de host: Traefik enruta por dominio en Dokploy
+    # (configurar el dominio apuntando al puerto interno 8000). `expose` no
+    # filtra nada en Compose V2 -las redes bridge no bloquean puertos entre
+    # contenedores-, pero documenta el puerto interno para el panel de Dokploy
+    # y para quien lea el archivo.
+    expose:
+      - "8000"
+    # Forma simple, a proposito, y NO `condition: service_healthy` como si usa
+    # el compose de PROD del backend contra su base de datos. La diferencia es
+    # real: el backend no puede atender ninguna peticion sin PostgreSQL, asi
+    # que arrancar sin base no aporta nada. El gateway si esta disenado para
+    # funcionar sin mosquitto: app/main.py llama a mqtt_gateway.start() sin
+    # esperar la conexion, y app/mqtt/client.py envuelve el intento en un
+    # `while True` con `except aiomqtt.MqttError` y `asyncio.sleep`, de modo
+    # que la API HTTP queda disponible desde el primer segundo y la conexion
+    # MQTT se establece cuando pueda.
+    # Acoplar el arranque al healthcheck de mosquitto perderia esa degradacion
+    # elegante -con broker caido, /v1/commands responde NO_CONF tras el
+    # timeout de ACK, que es una respuesta con significado para el backend, en
+    # vez de un error de conexion indistinguible de "gateway caido"- y
+    # multiplicaria los modos de fallo: unas credenciales mal puestas en el
+    # healthcheck de mosquitto lo dejarian `unhealthy` sirviendo
+    # perfectamente, y eso tumbaria tambien al gateway.
+    depends_on:
+      - mosquitto
+    # NO se usa `curl`: la imagen es python:3.11-slim y el Dockerfile solo
+    # instala las dependencias de requirements.lock, asi que curl no existe en
+    # el contenedor y el healthcheck fallaria siempre, dejando el servicio
+    # permanentemente `unhealthy`. Se usa el Python que ya esta en la imagen.
+    # urlopen lanza excepcion ante error de conexion o HTTP != 2xx, y esa
+    # excepcion ya produce un codigo de salida distinto de cero.
+    #
+    # La ruta es /v1/healthz: app/api/routes/health.py declara "/healthz" sin
+    # prefijo, app/api/router.py lo incluye sin prefijo, y app/main.py monta
+    # el router con prefix="/v1". No hay ningun prefijo "/api".
+    #
+    # El 8000 va fijo y no interpolado desde ${API_PORT}: el CMD del
+    # Dockerfile arranca uvicorn con --port 8000 literal, asi que un API_PORT
+    # equivocado no cambia donde escucha la app, pero si convertiria este
+    # chequeo en un fallo permanente.
+    #
+    # 127.0.0.1 y no localhost, por la misma razon IPv6 del healthcheck de
+    # mosquitto.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/v1/healthz', timeout=4).status == 200 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      # Margen para el grafo de imports (fastapi + sqlalchemy + asyncpg +
+      # aiomqtt) y el bind de uvicorn. No espera a PostgreSQL: el lifespan no
+      # bloquea en la base.
+      start_period: 20s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    # Las DOS redes, explicitamente. Es el punto donde es facil equivocarse:
+    # en Compose, en cuanto un servicio declara una clave `networks:` deja de
+    # conectarse a la red por defecto del proyecto. Si se pusiera
+    # `sgpmp-network` solo aqui y a `mosquitto` no se le pusiera nada, los dos
+    # servicios quedarian en redes distintas y dejarian de verse, rompiendo la
+    # conexion MQTT interna.
+    networks:
+      - broker-interna
+      - sgpmp-network
+
+networks:
+  # Red privada del stack: solo mosquitto y gateway. Mantiene al broker fuera
+  # de la red compartida.
+  broker-interna:
+    driver: bridge
+  # Red externa compartida con el stack del backend, por donde el gateway
+  # alcanza PostgreSQL por su hostname interno. Al ser `external: true`, debe
+  # existir antes de levantar el stack:
+  #   docker network create sgpmp-network
+  sgpmp-network:
+    external: true
+
+volumes:
+  # Nombre con sufijo de ambiente, igual que los volumenes de PROD del
+  # backend. Compose ya prefija los volumenes nombrados con el nombre del
+  # proyecto (`sgpmp-broker-prod_mosquitto_secrets_prod`), asi que no puede
+  # colisionar con el `mosquitto_secrets` de DEV aunque convivan en el mismo
+  # host; el sufijo es por simetria y legibilidad.
+  #
+  # OJO al rotar credenciales: el entrypoint hace upsert de usuarios, nunca
+  # los borra. Cambiar MQTT_DEVICE_USERNAME por otro nombre deja el usuario
+  # viejo valido para siempre dentro de este volumen. Revocar una credencial
+  # comprometida exige un `mosquitto_passwd -D` manual dentro del contenedor,
+  # no basta con cambiar la variable en Dokploy.
+  mosquitto_secrets_prod:
