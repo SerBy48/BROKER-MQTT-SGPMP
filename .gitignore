@@ -1,7 +1,17 @@
 __pycache__/
 *.py[cod]
 *.pyo
+# Variables de entorno
+# Regla general: se ignora cualquier .env.<ambiente> con valores reales
+# (.env.prod, .env.test, .env.local) y se reexcluyen las plantillas .example,
+# que sí van versionadas. Antes solo se ignoraba `.env` a secas, así que un
+# `.env.prod` o `.env.test` con valores quedaba expuesto en el árbol de
+# trabajo. La doble negación es necesaria porque `.env.*` también captura
+# `.env.example`.
 .env
+.env.*
+!.env.example
+!.env.*.example
 docker/passwd
 # Guías de conexión rellenadas con credenciales reales de un ambiente
 # concreto (dev/test/prod) — se entregan por canal privado, no se
