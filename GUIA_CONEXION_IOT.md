@@ -22,11 +22,13 @@ valores concretos de cada ambiente.
 | Dato | Valor |
 |---|---|
 | Host | `<host del ambiente — ver guía privada>` |
-| Puerto MQTT (TCP) | `<MQTT_HOST_PORT del ambiente>` |
-| Puerto MQTT (WebSocket) | `<MQTT_WS_HOST_PORT del ambiente>` |
+| Puerto MQTT (TCP, sin TLS) | `<MQTT_HOST_PORT del ambiente>` |
+| Puerto MQTT (TCP, TLS/mqtts) | `<MQTT_TLS_HOST_PORT del ambiente, si TLS está activo>` |
+| Puerto MQTT (WebSocket, sin TLS) | `<MQTT_WS_HOST_PORT del ambiente>` |
+| Puerto MQTT (WebSocket, TLS/wss) | `<MQTT_WSS_HOST_PORT del ambiente, si TLS está activo>` |
 | Usuario | `sgpmp_devices` (mismo nombre en todos los ambientes; la contraseña cambia por ambiente) |
 | Contraseña | `<ver guía privada del ambiente>` |
-| TLS | Depende del ambiente — confirmar en la guía privada. `dev` no tiene TLS. |
+| TLS | Depende del ambiente — confirmar en la guía privada cuál puerto usar. `dev` no tiene TLS todavía (ver limitación abajo); el broker ya soporta ambos modos en paralelo. |
 
 Esta es una credencial **compartida por todos los dispositivos** — el
 `serial` que va en el topic es lo que identifica a cada uno, no la
@@ -89,8 +91,12 @@ exista todavía, pídelo (ver sección 5).
 - **Credencial MQTT compartida, no por dispositivo.** No hay forma de
   revocar el acceso de un solo dispositivo sin afectar a todos — si se
   necesita eso, hay que definirlo como un cambio nuevo (ver sección 5).
-- **`dev` no tiene TLS.** El tráfico MQTT va sin cifrar en ese ambiente.
-  Antes de producción esto se activa — no es el comportamiento final.
+- **`dev` no tiene TLS.** El tráfico MQTT va sin cifrar en ese ambiente
+  (el broker soporta TLS desde SEG-BROKER-02, pero `dev` no tiene
+  certificados montados todavía). En ambientes con certificados,
+  conectarse por el puerto TLS (`MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT`
+  en vez de `MQTT_HOST_PORT`/`MQTT_WS_HOST_PORT`) — ambos puertos
+  coexisten mientras dure la migración, no es uno u otro.
 - **Sin reenvío automático de comandos.** Si un dispositivo estaba offline
   cuando se le envió un comando, alguien tiene que reintentarlo manualmente
   desde la UI una vez que el dispositivo reconecta — no está construido el

@@ -44,4 +44,54 @@ fi
 chown mosquitto:mosquitto "$PASSWD_FILE"
 chmod 0600 "$PASSWD_FILE"
 
+# TLS (SEG-BROKER-02): cifrado en tránsito para el tramo expuesto a
+# internet (dispositivos IoT conectando directo al broker). mosquitto.conf
+# incluye /mosquitto/config/conf.d/*.conf (include_dir) — acá se genera un
+# listener TLS por cada protocolo SOLO si hay certificados montados en
+# /mosquitto/certs (fullchain.pem + privkey.pem, convención Let's
+# Encrypt/certbot). Sin certs (ej. dev), el directorio queda vacío y el
+# broker sigue sirviendo solo texto plano en 1883/9001 — no falla el
+# arranque por esto.
+#
+# Ops decide cuándo "forzar" TLS de verdad: montar los certs acá activa el
+# listener cifrado en 8883/9002 SIN apagar el listener en texto plano —
+# apagarlo (o dejar de publicar 1884/9001 al host) es un paso aparte, para
+# no desconectar en producción dispositivos que todavía no migraron.
+CONF_D="/mosquitto/config/conf.d"
+mkdir -p "$CONF_D"
+rm -f "$CONF_D"/tls.conf
+
+TLS_CERT="/mosquitto/certs/fullchain.pem"
+TLS_KEY="/mosquitto/certs/privkey.pem"
+# Si ya existe (SEG-BROKER-01, ACL de privilegio mínimo), se referencia acá
+# también para que los listeners TLS queden igual de restringidos que los
+# de texto plano — sin acoplar esta rama a esa: si el archivo no existe
+# todavía, simplemente se omite la línea.
+ACL_FILE="/mosquitto/secrets/acl"
+
+if [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ]; then
+  {
+    echo "# Generado por mosquitto-entrypoint.sh — no editar a mano, se sobreescribe en cada arranque."
+    echo ""
+    echo "listener 8883"
+    echo "protocol mqtt"
+    echo "certfile $TLS_CERT"
+    echo "keyfile $TLS_KEY"
+    echo "allow_anonymous false"
+    echo "password_file $PASSWD_FILE"
+    if [ -f "$ACL_FILE" ]; then echo "acl_file $ACL_FILE"; fi
+    echo ""
+    echo "listener 9002"
+    echo "protocol websockets"
+    echo "certfile $TLS_CERT"
+    echo "keyfile $TLS_KEY"
+    echo "allow_anonymous false"
+    echo "password_file $PASSWD_FILE"
+    if [ -f "$ACL_FILE" ]; then echo "acl_file $ACL_FILE"; fi
+  } > "$CONF_D/tls.conf"
+  echo "TLS habilitado: escuchando mqtts en 8883 y wss en 9002."
+else
+  echo "AVISO: no hay certificados en /mosquitto/certs ($TLS_CERT / $TLS_KEY) — el broker sirve MQTT sin cifrar en 1883/9001. No usar así en producción (SEG-BROKER-02)." >&2
+fi
+
 exec /docker-entrypoint.sh "$@"
