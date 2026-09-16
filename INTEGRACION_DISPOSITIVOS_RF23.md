@@ -84,7 +84,7 @@ protocolo MQTT en sí, `CONNECT` con `username`/`password`).
 | Puerto MQTT (WebSocket) | *(entregado aparte)* |
 | Usuario | *(entregado aparte — no es `sgpmp_gateway`, ese es del gateway, no de los dispositivos)* |
 | Contraseña | *(entregado aparte)* |
-| TLS | No en este ambiente (dev) — sin cifrado en tránsito. Antes de producción hay que activar `MQTT_TLS`/certificados. |
+| TLS | No en este ambiente (dev) — sin cifrado en tránsito. El broker ya soporta un listener TLS en paralelo (puerto `MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT`, activo solo si el ambiente tiene certificados montados en `docker/certs/`, ver `docker/certs/README.md`); en `dev` todavía no hay certs. |
 
 Es una única credencial **compartida por todos los dispositivos** (no hay
 usuario/contraseña por dispositivo individual) — el `serial` en el topic es

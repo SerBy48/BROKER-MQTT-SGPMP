@@ -3,6 +3,12 @@ __pycache__/
 *.pyo
 .env
 docker/passwd
+# Certificados TLS reales del broker (SEG-BROKER-02) — clave privada
+# incluida, los entrega Ops por ambiente. docker/certs/README.md sí se
+# versiona (explica qué va acá), estos patrones no matchean ese archivo.
+docker/certs/*.pem
+docker/certs/*.crt
+docker/certs/*.key
 # Guías de conexión rellenadas con credenciales reales de un ambiente
 # concreto (dev/test/prod) — se entregan por canal privado, no se
 # versionan. La plantilla sin valores reales, GUIA_CONEXION_IOT.md, sí se

@@ -31,8 +31,17 @@ services:
     ports:
       - "${MQTT_HOST_PORT:-1884}:1883"
       - "${MQTT_WS_HOST_PORT:-9001}:9001"
+      # SEG-BROKER-02: puertos TLS (mqtts/wss). El entrypoint solo abre estos
+      # listeners si hay certs montados en ./docker/certs — publicarlos acá
+      # no rompe nada mientras tanto (nadie escucha del otro lado todavía).
+      - "${MQTT_TLS_HOST_PORT:-8883}:8883"
+      - "${MQTT_WSS_HOST_PORT:-9002}:9002"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # Certs TLS (fullchain.pem/privkey.pem, convención Let's
+      # Encrypt/certbot) — gitignoreados, los provee Ops por ambiente. Ver
+      # docker/certs/README.md.
+      - ./docker/certs:/mosquitto/certs:ro
       # Volumen nombrado en un directorio aparte (no /mosquitto/config,
       # que ya tiene el bind mount de arriba): ./docker/passwd está
       # gitignoreado y no existe en un clone nuevo, así que el entrypoint
