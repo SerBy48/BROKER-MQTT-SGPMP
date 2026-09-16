@@ -1,3 +1,9 @@
+## [0.2.0-rc.4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.3...v0.2.0-rc.4) (2026-09-16)
+
+### Bug Fixes
+
+* **mosquitto:** soportar listeners TLS (mqtts/wss) en el broker ([741c065](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/741c065716ea252dcac3426730e4a8735962d9bd))
+
 ## [0.2.0-rc.3](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.2...v0.2.0-rc.3) (2026-09-04)
 
 ### Features
