@@ -13,6 +13,14 @@ services:
       # sin esto el entrypoint nunca las recibe, aunque estén en Dokploy.
       MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME}
       MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD}
+      # Mismos nombres/prefijo de topic que usa el gateway (app/config.py)
+      # para generar el acl_file (SEG-BROKER-01) — si estos difieren entre
+      # los dos contenedores, el broker termina bloqueando topics legítimos.
+      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-sgpmp}
+      MQTT_TOPIC_TELEMETRY: ${MQTT_TOPIC_TELEMETRY:-telemetry}
+      MQTT_TOPIC_HEARTBEAT: ${MQTT_TOPIC_HEARTBEAT:-heartbeat}
+      MQTT_TOPIC_STATUS: ${MQTT_TOPIC_STATUS:-status}
+      MQTT_TOPIC_COMMAND: ${MQTT_TOPIC_COMMAND:-command}
     # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
     # este es el único servicio del broker que necesita puerto de host
     # publicado explícitamente (pedir que lo habiliten en el firewall,
