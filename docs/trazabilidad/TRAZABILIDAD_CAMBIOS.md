@@ -8,3 +8,4 @@ Este archivo se genera automáticamente en cada release (ver `scripts/append_tra
 | 0.2.0-rc.2 | v0.2.0-rc.2 | 2026-09-03 | — | — | — | 026c1e0 Merge pull request #9 from SerBy48/feature/dokploy-deploy-adjustments<br>a36051f fix(mosquitto): MQTT_DEVICE_USERNAME/PASSWORD nunca llegaban al contenedor + entrypoint no era idempotente |
 | 0.2.0-rc.3 | v0.2.0-rc.3 | 2026-09-04 | — | — | — | 04cbc3d Merge pull request #11 from SerBy48/feature/observabilidad-logs<br>cfd91b4 feat(logging): logs JSON detallados a stdout (MQTT/BD/API) sin depender de .env |
 | 0.2.0-rc.4 | v0.2.0-rc.4 | 2026-09-16 | — | — | — | e3a0649 Merge pull request #15 from SerBy48/feature/seg-broker-02-tls-mosquitto<br>741c065 fix(mosquitto): soportar listeners TLS (mqtts/wss) en el broker |
+| 0.2.0-rc.5 | v0.2.0-rc.5 | 2026-09-17 | — | — | — | 9327bc7 Merge pull request #16 from SerBy48/feature/seg-broker-01-acl-mosquitto-v2<br>869a315 fix(mosquitto): agregar acl_file con privilegio minimo por usuario |

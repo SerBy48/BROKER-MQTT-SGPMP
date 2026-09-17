@@ -1,3 +1,9 @@
+## [0.2.0-rc.5](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.4...v0.2.0-rc.5) (2026-09-17)
+
+### Bug Fixes
+
+* **mosquitto:** agregar acl_file con privilegio minimo por usuario ([869a315](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/869a315d74f99ba6d956608078fd94851c3bf61d))
+
 ## [0.2.0-rc.4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.3...v0.2.0-rc.4) (2026-09-16)
 
 ### Bug Fixes
