@@ -39,8 +39,8 @@ class Settings(BaseSettings):
     # de responder NO_CONF.
     mqtt_ack_timeout_seconds: int = 30
 
-    # API HTTPS
-    api_host: str = "0.0.0.0"
+    # API HTTPS (0.0.0.0 requerido dentro de contenedor Docker)
+    api_host: str = "0.0.0.0"  # nosec B104
     api_port: int = 8000
 
     @property
