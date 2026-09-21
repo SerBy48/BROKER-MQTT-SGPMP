@@ -39,11 +39,12 @@ services:
     ports:
       - "${MQTT_HOST_PORT:-1884}:1883"
       - "${MQTT_WS_HOST_PORT:-9001}:9001"
-      # SEG-BROKER-02: puertos TLS (mqtts/wss). El entrypoint solo abre estos
-      # listeners si hay certs montados en ./docker/certs — publicarlos acá
-      # no rompe nada mientras tanto (nadie escucha del otro lado todavía).
-      - "${MQTT_TLS_HOST_PORT:-8883}:8883"
-      - "${MQTT_WSS_HOST_PORT:-9002}:9002"
+      # SEG-BROKER-02: puertos TLS (mqtts/wss). Descomentar o definir únicamente
+      # en ambientes donde se monten certificados en ./docker/certs y se asigne
+      # un puerto de host no colisionante en Dokploy. No publicar por defecto
+      # en dev/test porque 8883 ya está ocupado en el host por EMQX y 9002 por test.
+      # - "${MQTT_TLS_HOST_PORT:-8883}:8883"
+      # - "${MQTT_WSS_HOST_PORT:-9002}:9002"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       # Certs TLS (fullchain.pem/privkey.pem, convención Let's
