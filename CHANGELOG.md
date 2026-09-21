@@ -1,3 +1,9 @@
+## [0.2.0-rc.6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.5...v0.2.0-rc.6) (2026-09-21)
+
+### Bug Fixes
+
+* **dokploy:** comentar puertos tls por defecto para evitar colision en 8883 ([32644e8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/32644e84834ad50a4527e13a11ef32dfc33fa201))
+
 ## [0.2.0-rc.5](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.4...v0.2.0-rc.5) (2026-09-17)
 
 ### Bug Fixes
