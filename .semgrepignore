@@ -1,0 +1,15 @@
+# Semgrep Ignore Rules - BROKER-MQTT-SGPMP
+# Excluye directorios fuera del alcance de aplicación o gestionados externamente
+# Referencia: GUIA-OPERACION-SAST-CI-CD.md (docs-sgpmp/seguridad)
+
+tests/
+docs/
+docker/
+scripts/
+*.md
+*.json
+*.yml
+*.yaml
+*.conf
+.venv/
+venv/
