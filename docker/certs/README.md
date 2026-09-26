@@ -32,3 +32,27 @@ en producción dispositivos que todavía no migraron a TLS). Cuando todos
 los dispositivos de un ambiente ya soporten TLS, dejar de publicar
 `MQTT_HOST_PORT`/`MQTT_WS_HOST_PORT` al host (o cerrarlos en el firewall)
 para forzarlo de verdad.
+
+## Modo "solo TLS" hacia afuera (TC-M09-253) — test/prod
+
+`docker-compose.yml` publica al host el puerto del contenedor que indiquen
+estas dos variables (por defecto `1883`/`9001`, texto plano, como en `dev`):
+
+```
+MQTT_PUERTO_PUBLICO=8883        # MQTT -> mqtts
+MQTT_WS_PUERTO_PUBLICO=9002     # WebSocket -> wss
+```
+
+Con eso el host publica **solo** los listeners TLS, **en los mismos puertos de
+host de siempre** (`MQTT_HOST_PORT` / `MQTT_WS_HOST_PORT`): no hay que tocar el
+firewall ni el puerto que tienen configurado los dispositivos, solo que ahora
+hablan TLS. El texto plano (1883/9001) sigue existiendo dentro de la red de
+Docker porque el gateway lo usa así, pero ya no es alcanzable desde afuera.
+
+Si se pide TLS y faltan `fullchain.pem`/`privkey.pem`, el entrypoint **aborta el
+arranque** (código 1) en vez de dejar un puerto publicado sin listener. Verificado
+con un certificado autofirmado: conexiones `tcp` y `websockets` en texto plano
+con credenciales válidas no reciben CONNACK; `mqtts` y `wss` conectan.
+
+Los puertos `MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT` de arriba siguen siendo la
+opción para un ambiente que necesite **ambos** modos durante una migración.

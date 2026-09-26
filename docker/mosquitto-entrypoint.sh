@@ -102,9 +102,12 @@ chmod 0600 "$ACL_FILE"
 # arranque por esto.
 #
 # Ops decide cuándo "forzar" TLS de verdad: montar los certs acá activa el
-# listener cifrado en 8883/9002 SIN apagar el listener en texto plano —
-# apagarlo (o dejar de publicar 1884/9001 al host) es un paso aparte, para
-# no desconectar en producción dispositivos que todavía no migraron.
+# listener cifrado en 8883/9002 SIN apagar el listener en texto plano (el
+# gateway lo usa por la red interna de Docker, así que tampoco se puede apagar).
+# Lo que se controla es qué puertos se PUBLICAN al host: docker-compose.yml
+# publica el puerto del contenedor que indiquen MQTT_PUERTO_PUBLICO (1883 texto
+# plano | 8883 TLS) y MQTT_WS_PUERTO_PUBLICO (9001 | 9002). Con 8883/9002 el
+# texto plano queda solo dentro de la red de Docker (TC-M09-253).
 CONF_D="/mosquitto/config/conf.d"
 mkdir -p "$CONF_D"
 rm -f "$CONF_D"/tls.conf
@@ -115,7 +118,28 @@ TLS_KEY="/mosquitto/certs/privkey.pem"
 # también para que los listeners TLS queden igual de restringidos que los
 # de texto plano.
 
-if [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ]; then
+# TC-M09-253: si se publica un puerto TLS al host pero no hay certificados, el
+# puerto quedaría muerto sin que nadie se entere (el listener nunca se crea).
+# Es preferible no arrancar a arrancar "sano" y sin canal para los dispositivos.
+PUBLICA_TLS=0
+if [ "${MQTT_PUERTO_PUBLICO:-1883}" = "8883" ]; then PUBLICA_TLS=1; fi
+if [ "${MQTT_WS_PUERTO_PUBLICO:-9001}" = "9002" ]; then PUBLICA_TLS=1; fi
+HAY_CERTS=0
+if [ -f "$TLS_CERT" ] && [ -f "$TLS_KEY" ]; then HAY_CERTS=1; fi
+
+if [ "$PUBLICA_TLS" = "1" ] && [ "$HAY_CERTS" = "0" ]; then
+  echo "ERROR: MQTT_PUERTO_PUBLICO/MQTT_WS_PUERTO_PUBLICO piden publicar TLS (8883/9002) pero no hay certificados en /mosquitto/certs ($TLS_CERT / $TLS_KEY). Se aborta el arranque: sin certificados esos puertos quedarían sin listener (TC-M09-253)." >&2
+  exit 1
+fi
+
+if [ "${MQTT_PUERTO_PUBLICO:-1883}" = "8883" ] && [ "${MQTT_WS_PUERTO_PUBLICO:-9001}" != "9002" ]; then
+  echo "AVISO: MQTT (8883) se publica solo por TLS pero WebSocket (MQTT_WS_PUERTO_PUBLICO=${MQTT_WS_PUERTO_PUBLICO:-9001}) sigue publicando texto plano. Definir MQTT_WS_PUERTO_PUBLICO=9002." >&2
+fi
+if [ "${MQTT_WS_PUERTO_PUBLICO:-9001}" = "9002" ] && [ "${MQTT_PUERTO_PUBLICO:-1883}" != "8883" ]; then
+  echo "AVISO: WebSocket (9002) se publica solo por TLS pero MQTT (MQTT_PUERTO_PUBLICO=${MQTT_PUERTO_PUBLICO:-1883}) sigue publicando texto plano. Definir MQTT_PUERTO_PUBLICO=8883." >&2
+fi
+
+if [ "$HAY_CERTS" = "1" ]; then
   {
     echo "# Generado por mosquitto-entrypoint.sh — no editar a mano, se sobreescribe en cada arranque."
     echo ""

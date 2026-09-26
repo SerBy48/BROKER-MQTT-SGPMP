@@ -21,6 +21,10 @@ services:
       MQTT_TOPIC_HEARTBEAT: ${MQTT_TOPIC_HEARTBEAT:-heartbeat}
       MQTT_TOPIC_STATUS: ${MQTT_TOPIC_STATUS:-status}
       MQTT_TOPIC_COMMAND: ${MQTT_TOPIC_COMMAND:-command}
+      # TC-M09-253: qué puerto del contenedor se publica al host (ver "ports").
+      # El entrypoint los usa para abortar el arranque si se pide TLS sin certs.
+      MQTT_PUERTO_PUBLICO: ${MQTT_PUERTO_PUBLICO:-1883}
+      MQTT_WS_PUERTO_PUBLICO: ${MQTT_WS_PUERTO_PUBLICO:-9001}
     # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, así que
     # este es el único servicio del broker que necesita puerto de host
     # publicado explícitamente (pedir que lo habiliten en el firewall,
@@ -36,9 +40,18 @@ services:
     # (ej. 5449) también dentro del contenedor del gateway, que entonces
     # intenta conectar a mosquitto:5449 (nada escucha ahí) en vez de
     # mosquitto:1883 → "Connection refused" permanente. Ya pasó una vez.
+    #
+    # TC-M09-253 (TLS obligatorio en el canal expuesto): el segundo número de
+    # cada mapeo es el puerto del CONTENEDOR que se publica. Por defecto es el de
+    # texto plano (1883/9001: dev, sin certificados). En test/prod definir
+    #   MQTT_PUERTO_PUBLICO=8883  MQTT_WS_PUERTO_PUBLICO=9002
+    # (con certs en docker/certs, ver docker/certs/README.md): el host publica
+    # solo los listeners TLS, y el texto plano queda únicamente dentro de la red
+    # de Docker, donde lo usa el gateway. Los puertos de host no cambian
+    # (MQTT_HOST_PORT / MQTT_WS_HOST_PORT), así que no hay que tocar el firewall.
     ports:
-      - "${MQTT_HOST_PORT:-1884}:1883"
-      - "${MQTT_WS_HOST_PORT:-9001}:9001"
+      - "${MQTT_HOST_PORT:-1884}:${MQTT_PUERTO_PUBLICO:-1883}"
+      - "${MQTT_WS_HOST_PORT:-9001}:${MQTT_WS_PUERTO_PUBLICO:-9001}"
       # SEG-BROKER-02: puertos TLS (mqtts/wss). Descomentar o definir únicamente
       # en ambientes donde se monten certificados en ./docker/certs y se asigne
       # un puerto de host no colisionante en Dokploy. No publicar por defecto
