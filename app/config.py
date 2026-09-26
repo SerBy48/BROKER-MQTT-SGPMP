@@ -39,6 +39,13 @@ class Settings(BaseSettings):
     # de responder NO_CONF.
     mqtt_ack_timeout_seconds: int = 30
 
+    # TC-M09-252 (anti-replay): cada comando lleva `id_comando` y el ACK debe
+    # devolverlo. Con False (default) un ACK SIN id todavía se acepta, para no
+    # romper firmware que aún no lo devuelve; un ACK con un id DISTINTO se
+    # ignora siempre. Pasar a True cuando IoT confirme que ya lo devuelve: así
+    # un ACK capturado y reenviado (o forjado sin id) deja de resolver comandos.
+    mqtt_ack_requiere_id_comando: bool = False
+
     # API HTTPS (0.0.0.0 requerido dentro de contenedor Docker)
     api_host: str = "0.0.0.0"  # nosec B104
     api_port: int = 8000
