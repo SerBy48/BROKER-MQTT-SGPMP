@@ -28,7 +28,7 @@ valores concretos de cada ambiente.
 | Puerto MQTT (WebSocket, TLS/wss) | `<MQTT_WSS_HOST_PORT del ambiente, si TLS está activo>` |
 | Usuario | `sgpmp_devices` (mismo nombre en todos los ambientes; la contraseña cambia por ambiente) |
 | Contraseña | `<ver guía privada del ambiente>` |
-| TLS | Depende del ambiente — confirmar en la guía privada cuál puerto usar. `dev` no tiene TLS todavía (ver limitación abajo); el broker ya soporta ambos modos en paralelo. |
+| TLS | `dev` no tiene TLS (texto plano). **En `test`/`prod` el TLS es obligatorio** (TC-M09-253): los puertos publicados hablan solo `mqtts`/`wss`, con los mismos números de siempre; una conexión en texto plano no conecta. Confirmar el puerto en la guía privada del ambiente. |
 
 Esta es una credencial **compartida por todos los dispositivos** — el
 `serial` que va en el topic es lo que identifica a cada uno, no la
@@ -60,6 +60,10 @@ Los contratos de payload completos (telemetría, heartbeat, comando, ACK)
 están en `INTEGRACION_DISPOSITIVOS_RF23.md` y en el `README.md` de este
 repo — no se repiten acá para no tener dos fuentes de verdad desincronizadas.
 
+**Novedad (TC-M09-252):** el comando trae `id_comando` y `emitido_en`, y el
+dispositivo debe devolver `id_comando` en el ACK y no re-aplicar un comando ya
+procesado. Detalle y motivo en `INTEGRACION_DISPOSITIVOS_RF23.md`, pasos 2 y 3.
+
 ---
 
 ## 3. Probar la conexión sin hardware real
@@ -89,14 +93,19 @@ exista todavía, pídelo (ver sección 5).
 ## 4. Limitaciones conocidas (léelo antes de reportar como bug)
 
 - **Credencial MQTT compartida, no por dispositivo.** No hay forma de
-  revocar el acceso de un solo dispositivo sin afectar a todos — si se
-  necesita eso, hay que definirlo como un cambio nuevo (ver sección 5).
-- **`dev` no tiene TLS.** El tráfico MQTT va sin cifrar en ese ambiente
-  (el broker soporta TLS desde SEG-BROKER-02, pero `dev` no tiene
-  certificados montados todavía). En ambientes con certificados,
-  conectarse por el puerto TLS (`MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT`
-  en vez de `MQTT_HOST_PORT`/`MQTT_WS_HOST_PORT`) — ambos puertos
-  coexisten mientras dure la migración, no es uno u otro.
+  revocar el acceso de un solo dispositivo sin afectar a todos, y cualquier
+  dispositivo con la credencial puede leer el topic `command` de **otro**
+  serial (TC-M09-250/251, reproducido y documentado). Cerrarlo requiere
+  credencial por dispositivo: hay una propuesta lista en
+  [`docs/RFC_credencial_mqtt_por_dispositivo.md`](./docs/RFC_credencial_mqtt_por_dispositivo.md),
+  que pasa por RFC (ver sección 5).
+- **`dev` no tiene TLS; `test`/`prod` solo aceptan TLS.** En `dev` el
+  tráfico MQTT va sin cifrar (no tiene certificados montados). En `test`/
+  `prod` (TC-M09-253) el host publica únicamente los listeners TLS, en los
+  puertos de siempre: el cliente debe conectar con `mqtts`/`wss` y validar el
+  certificado; en texto plano no hay respuesta. Si un ambiente necesitara los
+  dos modos a la vez durante una migración, se publican los puertos TLS aparte
+  (`MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT`, ver `docker/certs/README.md`).
 - **Sin reenvío automático de comandos.** Si un dispositivo estaba offline
   cuando se le envió un comando, alguien tiene que reintentarlo manualmente
   desde la UI una vez que el dispositivo reconecta — no está construido el
