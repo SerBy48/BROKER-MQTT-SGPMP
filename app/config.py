@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     mqtt_client_id: str = "sgpmp"
     mqtt_reconnect_delay: int = 5
 
+    # Credencial COMPARTIDA legacy de los dispositivos (TC-M09-250/251). Mientras
+    # esté definida, el gateway la mantiene en dynamic-security con la ACL de
+    # siempre para que las Raspberry sin credencial propia sigan conectando.
+    # Quitarla de Dokploy cuando todas migraron: el gateway borra ese cliente.
+    mqtt_device_username: str | None = None
+    mqtt_device_password: str | None = None
+
     # Convención de topics
     mqtt_topic_prefix: str = "sgpmp"
     mqtt_topic_telemetry: str = "telemetry"

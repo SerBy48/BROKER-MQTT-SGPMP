@@ -22,6 +22,7 @@ class MqttGateway:
         self.settings = settings
         self._client: aiomqtt.Client | None = None
         self._task: asyncio.Task[None] | None = None
+        self._sync_task: asyncio.Task[None] | None = None
 
     def _build_client(self) -> aiomqtt.Client:
         tls_context = None
@@ -38,7 +39,18 @@ class MqttGateway:
             tls_context=tls_context,
         )
 
+    async def _sincronizar_credenciales(self) -> None:
+        # En una tarea aparte: las respuestas de dynamic-security llegan por el
+        # mismo bucle de mensajes de run(), que no puede quedar esperándolas.
+        from app.services.credenciales_mqtt import sincronizar
+
+        try:
+            await sincronizar()
+        except Exception:
+            logger.exception("No se pudo sincronizar dynamic-security al conectar")
+
     async def run(self) -> None:
+        from app.mqtt.dynsec import TOPIC_RESPUESTA
         from app.mqtt.handlers import handle_message
 
         logger.debug(
@@ -55,10 +67,12 @@ class MqttGateway:
                     await client.subscribe(self.settings.telemetry_topic, qos=1)
                     await client.subscribe(self.settings.heartbeat_topic, qos=1)
                     await client.subscribe(self.settings.status_topic, qos=1)
+                    await client.subscribe(TOPIC_RESPUESTA, qos=1)
                     logger.info(
                         "MQTT conectado y suscrito a %s/{telemetry,heartbeat,status}",
                         self.settings.mqtt_topic_prefix,
                     )
+                    self._sync_task = asyncio.create_task(self._sincronizar_credenciales())
                     async for message in client.messages:
                         topic = _topic_str(message.topic)
                         logger.debug(

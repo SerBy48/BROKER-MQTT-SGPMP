@@ -24,6 +24,28 @@ async def resolve_device_id(session: AsyncSession, serial: str) -> int | None:
     return device_id
 
 
+async def estado_seriales(
+    session: AsyncSession, seriales: list[str] | None = None
+) -> dict[str, bool]:
+    """`serial -> es_activo` de los `seriales` dados (o de todos con None).
+
+    Un serial que no está en el resultado no existe en modulo9.
+    """
+    if seriales is None:
+        result = await session.execute(
+            text("SELECT serial, es_activo FROM modulo9.dispositivos_iot")
+        )
+    else:
+        result = await session.execute(
+            text(
+                "SELECT serial, es_activo FROM modulo9.dispositivos_iot "
+                "WHERE serial = ANY(:seriales)"
+            ),
+            {"seriales": seriales},
+        )
+    return {serial: es_activo for serial, es_activo in result}
+
+
 async def resolve_variable_id(session: AsyncSession, nombre: str) -> int | None:
     result = await session.execute(
         text("SELECT id_variable_ambiental FROM modulo9.variables_ambientales WHERE nombre = :nombre"),

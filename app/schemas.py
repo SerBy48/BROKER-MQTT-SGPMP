@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StringConstraints
 
 from app.core.enums import (
     CategoriaVariable,
@@ -78,3 +78,34 @@ class CommandResponse(BaseModel):
     topic: str | None = None
     estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
     mensaje: str
+
+
+# Mismo allow-list que SerialDispositivo en sgpmp-backend. Además es una barrera
+# de seguridad acá: el serial termina dentro de nombres de rol y de topics de la
+# ACL de dynamic-security, donde un '#', '+' o '/' abriría permisos ajenos.
+PATRON_SERIAL = r"^[A-Za-z0-9_-]{1,50}$"
+Serial = Annotated[str, StringConstraints(pattern=PATRON_SERIAL)]
+
+
+class CredencialRequest(BaseModel):
+    """Alta o rotación de la credencial MQTT de una Raspberry (SEG-BROKER-03).
+
+    El serial principal (el del path) es el usuario MQTT. `seriales_adicionales`
+    son los otros seriales que esa misma Raspberry transmite (modelo "serial por
+    ESP32"); vacío en el modelo "serial por sitio".
+    """
+
+    seriales_adicionales: list[Serial] = Field(default_factory=list, max_length=50)
+
+
+class CredencialResponse(BaseModel):
+    usuario: str
+    password: str
+    seriales: list[str]
+
+
+class EstadoCredencialResponse(BaseModel):
+    usuario: str
+    habilitada: bool
+    conectada: bool
+    seriales: list[str]
