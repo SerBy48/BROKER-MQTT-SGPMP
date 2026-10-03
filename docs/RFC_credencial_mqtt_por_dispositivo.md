@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Estado** | Propuesta. Pendiente de aprobación de Análisis/IoT; **no implementada**. |
+| **Estado** | **Implementada (opción A)** con un ajuste al modelo: ver la sección 7. Aprobada por el líder del proyecto. |
 | **Origen** | TC-M09-G127, casos **TC-M09-250** y **TC-M09-251** (ataques al protocolo MQTT, RF-23) |
 | **Relacionado** | SEG-BROKER-01 (ACL de mínimo privilegio), TC-M09-252 y TC-M09-253 (resueltos aparte, ver abajo) |
 | **Alcance** | Broker (`BROKER-MQTT-SGPMP`), backend (`sgpmp-backend`), firmware |
@@ -149,3 +149,78 @@ compartida podría declarar el client id de otro dispositivo.
   de un *join-request* y la unicidad de las claves de sesión (AppSKey/NwkSKey)
   pertenecen a ese servidor de red y al firmware del sensor, no a este broker.
   Ver `anotaciones/modulo_9/tc_m09_g127_g128_seguridad_iot.md` en `sgpmp-backend`.
+
+## 7. Implementación (SEG-BROKER-03)
+
+### 7.1 Ajuste al modelo: credencial por Raspberry, rol por serial
+
+La sección 4 asumía "un usuario por dispositivo, `usuario = serial`" y un rol
+`dispositivo` con `%u`. En `EDGE-FIRMWARE-SGPMP` una Raspberry es **una sola
+conexión MQTT que transmite por 1 o N seriales** (`EDGE_SERIALS`; el modelo
+"serial por sitio" o "serial por ESP32" sigue sin decidirse). Con `%u`, una
+Raspberry con varios seriales necesitaría varias conexiones. Se implementó:
+
+- **Un cliente dynsec por Raspberry**, con usuario = su serial principal.
+- **Un rol `serial-<S>` por serial**, con topics literales:
+  `publishClientSend sgpmp/<S>/{telemetry,heartbeat,status}`,
+  `subscribeLiteral` y `publishClientReceive` sobre `sgpmp/<S>/command`, y
+  `allowwildcardsubs: false`. La Raspberry recibe un rol por cada serial que
+  transmite.
+- Revocar un serial es `deleteRole serial-<S>` (se lo quita a cualquier
+  Raspberry); revocar una Raspberry es `disableClient` (la desconecta en el acto).
+
+Sirve para los dos modelos de serial sin elegir uno.
+
+### 7.2 Verificado contra Mosquitto 2.1.2 (imagen fijada del broker)
+
+| Prueba | Resultado |
+|---|---|
+| `SUBSCRIBE #`, `sgpmp/#`, `sgpmp/+/command`, `sgpmp/<otro>/command` | "All subscription requests were denied" (cumple TC-M09-251) |
+| `SUBSCRIBE` del `command` propio y de un serial adicional | Concedido |
+| Publicar en `status` o `command` de otro serial (MQTT v5) | "Not authorized" (TC-M09-250) |
+| Comando del gateway a otro serial | No llega a la Raspberry |
+| Rotar la credencial | La clave vieja queda rechazada |
+| `disableClient` con la Raspberry conectada | Desconectada al instante; no puede reconectar |
+| Credencial compartida legacy | Sigue publicando; su `SUBSCRIBE #` ahora también se deniega |
+
+Se reproduce con `scripts/e2e_credenciales_mqtt.py` (gateway real contra el
+broker del docker-compose, 22 verificaciones; instrucciones en el script). Las
+pruebas unitarias están en `tests/test_credenciales_mqtt.py` y
+`tests/test_api_credenciales.py`.
+
+Comportamientos de dynsec que condicionan la implementación (medidos):
+
+- Con el broker apagado, `mosquitto_ctrl -f <archivo> dynsec` **solo** puede
+  cambiar la clave de un cliente que ya existe; crear roles o clientes no hace
+  nada. Por eso el entrypoint solo hace `dynsec init` (primer arranque) y rota
+  las claves del gateway y de la legacy; los roles y clientes los crea el
+  gateway por `$CONTROL` al conectar.
+- `modifyClient` y `setClientPassword` desconectan al cliente **aunque no cambie
+  nada**, y `modifyRole` desconecta a quien tenga ese rol. La sincronización del
+  gateway lee el estado y solo escribe lo que difiere; si no, expulsaría al
+  gateway y a las Raspberry legacy en cada conexión. La única desconexión
+  esperada es la del gateway en el primer arranque, al asignarse su rol.
+- `addClientRole` sobre un rol que el cliente ya tiene devuelve "Internal
+  error": se usa `modifyClient` con la lista completa de roles.
+
+### 7.3 Piezas
+
+| Repo | Qué hace |
+|---|---|
+| BROKER-MQTT-SGPMP | `docker/mosquitto.conf` (plugin), `docker/mosquitto-entrypoint.sh` (init y rotación offline), `app/mqtt/dynsec.py` (cliente `$CONTROL`), `app/services/credenciales_mqtt.py` (modelo, sincronización y reconciliación con modulo9), `POST/GET/DELETE /v1/devices/{serial}/credential` |
+| sgpmp-backend | RBAC, auditoría en la bitácora IoT y llamada HTTPS al gateway; revoca al desactivar el dispositivo |
+| sgpmp-frontend | Sección "Credencial MQTT" en el detalle del dispositivo; la contraseña se muestra una sola vez |
+| EDGE-FIRMWARE-SGPMP | Sin cambio de código para conectar (ya lee `EDGE_MQTT_USERNAME/PASSWORD`); documentación de instalación |
+
+### 7.4 Migración
+
+1. Desplegar broker y gateway: el entrypoint crea `dynamic-security.json` y el
+   gateway da de alta la credencial compartida con su ACL de siempre. Ninguna
+   Raspberry se corta.
+2. Generar la credencial de cada Raspberry desde la plataforma y copiarla a su
+   `/etc/sgpmp/edge-agent.env`.
+3. Cuando todas migraron, borrar `MQTT_DEVICE_USERNAME`/`MQTT_DEVICE_PASSWORD` en
+   Dokploy: el gateway elimina la credencial compartida al reconectar. Desde ahí
+   TC-M09-250/251 quedan cerrados.
+4. Respaldar el volumen `mosquitto_secrets` (Volume Backups de Dokploy): perderlo
+   obliga a regenerar e instalar la credencial de cada Raspberry.

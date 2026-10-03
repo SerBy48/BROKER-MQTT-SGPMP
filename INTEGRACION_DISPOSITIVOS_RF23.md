@@ -106,15 +106,32 @@ protocolo MQTT en sí, `CONNECT` con `username`/`password`).
 | Host | *(entregado aparte según ambiente — dev/test/prod)* |
 | Puerto MQTT (TCP) | *(entregado aparte, ver tabla de variables más abajo)* |
 | Puerto MQTT (WebSocket) | *(entregado aparte)* |
-| Usuario | *(entregado aparte — no es `sgpmp_gateway`, ese es del gateway, no de los dispositivos)* |
-| Contraseña | *(entregado aparte)* |
+| Usuario | El **serial principal** de la Raspberry (el primero de `EDGE_SERIALS`) |
+| Contraseña | La genera la plataforma para esa Raspberry; se muestra una sola vez |
 | TLS | **`dev`: sin cifrado** (no tiene certificados). **`test`/`prod`: TLS obligatorio (TC-M09-253)** — el host publica solo los listeners cifrados (`mqtts`/`wss`) en los mismos números de puerto de siempre; una conexión en texto plano ya no conecta. Ver `docker/certs/README.md`. |
 
-Es una única credencial **compartida por todos los dispositivos** (no hay
-usuario/contraseña por dispositivo individual) — el `serial` en el topic es
-lo que identifica a cada uno, no la credencial de conexión. Si se necesita
-revocar acceso a un dispositivo específico sin afectar al resto, avisen: hoy
-no está soportado (se rotaría la credencial compartida para todos).
+**Una credencial por Raspberry** (TC-M09-250/251): la Raspberry es una sola
+conexión MQTT aunque transmita por varios seriales, así que la credencial es
+de ella y lleva permiso sobre cada uno de esos seriales. Con esa credencial:
+
+- puede publicar en `telemetry`, `heartbeat` y `status` **de sus seriales**;
+- puede suscribirse a `command` **de sus seriales** (topic literal, sin `+` ni `#`);
+- cualquier otro topic se rechaza: un `SUBSCRIBE` con comodines o sobre otro
+  serial recibe un SUBACK de fallo, y un publish ajeno se descarta (en MQTT v5,
+  PUBACK con código 135 "Not authorized"; en v3.1.1, PUBACK 0 sin entrega).
+
+La genera un usuario autorizado en la plataforma (detalle del dispositivo IoT →
+"Credencial MQTT"), que la copia al archivo de configuración de esa Raspberry
+(`/etc/sgpmp/edge-agent.env`: `EDGE_MQTT_USERNAME`, `EDGE_MQTT_PASSWORD`,
+`EDGE_SERIALS`). Rotarla invalida la clave anterior (hay que actualizar el
+archivo); revocarla o desactivar el dispositivo desconecta a la Raspberry en el
+acto. Si el broker rechaza la conexión con "Not authorized", la credencial fue
+rotada o revocada: el firmware debe seguir reintentando con backoff, no
+cambiar de credencial por su cuenta.
+
+Durante la migración sigue existiendo la credencial **compartida**
+`sgpmp_devices` con los permisos de siempre, para no cortar a las Raspberry que
+todavía no tienen la suya. Se retira cuando todas migraron.
 
 ## Qué NO tienen que hacer
 
@@ -135,15 +152,14 @@ Mientras el firmware no esté listo, se puede simular el ACK manualmente
 (esto es lo que usamos para las pruebas):
 
 ```bash
-docker exec <container_mosquitto> mosquitto_pub -h localhost \
-  -u sgpmp_devices -P '<MQTT_DEVICE_PASSWORD real>' \
+mosquitto_pub -h <host> -p <puerto> -V mqttv5 \
+  -u <serial> -P '<contraseña generada para ese serial>' \
   -t "sgpmp/<serial>/status" \
   -m '{"tipo_mensaje":"ACK_CONFIGURACION","resultado":"OK","id_comando":"<id_comando del comando recibido>"}' -q 1
 ```
 
-(`<container_mosquitto>` es el nombre real del contenedor en ese ambiente —
-ya no es fijo, Dokploy lo genera automáticamente por proyecto/ambiente;
-consultarlo en el panel o con `docker ps`.)
+(Con la credencial compartida `sgpmp_devices` también funciona mientras dure
+la migración.)
 
 ## Configuración relevante del broker (por si cambia el ambiente)
 
