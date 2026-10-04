@@ -35,9 +35,17 @@ def _entorno(monkeypatch: pytest.MonkeyPatch):
     async def estado(_session, _serial):
         return "ACTIVO"
 
+    async def mapa(_session):
+        return {}
+
+    async def conectado(_usuario):
+        return False
+
     monkeypatch.setattr(dispatch, "async_session_factory", sesion_falsa)
     monkeypatch.setattr(dispatch.registry, "resolve_device_id", resolver_id)
     monkeypatch.setattr(dispatch.registry, "resolve_device_state", estado)
+    monkeypatch.setattr(dispatch.registry, "mapa_dispositivos", mapa)
+    monkeypatch.setattr(dispatch.credenciales_mqtt, "sin_conexion", conectado)
     correlacion._pending_acks.clear()
     yield
     correlacion._pending_acks.clear()

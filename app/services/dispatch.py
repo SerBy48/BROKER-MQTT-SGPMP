@@ -19,10 +19,22 @@ from app.db.engine import async_session_factory
 from app.db.repositories import registry
 from app.mqtt import correlacion, publisher
 from app.schemas import CommandRequest, CommandResponse
+from app.services import credenciales_mqtt
 
 logger = logging.getLogger(__name__)
 
 _ESTADO_ALCANZABLE = "ACTIVO"
+
+
+async def _sin_conexion(receptor: str) -> bool:
+    # Atajo best-effort: ante cualquier falla se publica y se espera el ACK, como antes.
+    try:
+        return await credenciales_mqtt.sin_conexion(receptor)
+    except Exception:
+        logger.warning(
+            "No se pudo consultar la conexión de %s; se publica igual.", receptor, exc_info=True
+        )
+        return False
 
 
 async def dispatch_command(request: CommandRequest) -> CommandResponse:
@@ -33,6 +45,7 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
             raise DeviceNotFoundError(request.serial)
 
         estado_dispositivo = await registry.resolve_device_state(session, request.serial)
+        registro = (await registry.mapa_dispositivos(session)).get(request.serial)
 
     if estado_dispositivo != _ESTADO_ALCANZABLE:
         logger.info(
@@ -45,6 +58,24 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
             serial=request.serial,
             estado="PENDIENTE",
             mensaje="Dispositivo offline. La configuración quedará pendiente hasta que reconecte.",
+        )
+
+    # El estado en BD tarda en pasar a offline cuando el Edge se apaga; sin este
+    # chequeo se publica y se esperan los 30 s del ACK para terminar en NO_CONF.
+    receptor = (registro and registro.serial_gateway) or request.serial
+    if await _sin_conexion(receptor):
+        logger.info(
+            "%s no está conectado al broker; no se publica a %s, PENDIENTE.",
+            receptor,
+            request.serial,
+        )
+        return CommandResponse(
+            serial=request.serial,
+            estado="PENDIENTE",
+            mensaje=(
+                f"{receptor} no está conectado al broker. "
+                "La configuración quedará pendiente hasta que reconecte."
+            ),
         )
 
     settings = get_settings()
@@ -80,9 +111,7 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
             mensaje="El dispositivo confirmó la recepción de la configuración.",
         )
     except TimeoutError:
-        logger.error(
-            "Sin ACK de %s tras %ss.", request.serial, settings.mqtt_ack_timeout_seconds
-        )
+        logger.error("Sin ACK de %s tras %ss.", request.serial, settings.mqtt_ack_timeout_seconds)
         return CommandResponse(
             serial=request.serial,
             topic=topic,

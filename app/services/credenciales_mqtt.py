@@ -355,6 +355,21 @@ async def sincronizar_credencial(serial: str) -> bool:
     return True
 
 
+async def sin_conexion(usuario: str) -> bool:
+    """True solo si es seguro que nadie recibe los comandos que van por `usuario`.
+
+    `usuario` es el Gateway Edge del dispositivo, o el dispositivo si se conecta
+    directo. Si no tiene credencial propia, o alguien está conectado con la
+    compartida legacy (un Edge que aún no migró), no se sabe quién los recibe: False.
+    """
+    settings = get_settings()
+    comandos = [{"command": "getClient", "username": usuario}]
+    if settings.mqtt_device_username and settings.mqtt_device_password:
+        comandos.append({"command": "getClient", "username": settings.mqtt_device_username})
+    respuestas = await dynsec.ejecutar(comandos)
+    return not any(r.get("error") or r["data"]["client"].get("connections") for r in respuestas)
+
+
 async def consultar(serial: str) -> EstadoCredencial | None:
     _rechazar_reservado(get_settings(), serial)
     (respuesta,) = await dynsec.ejecutar([{"command": "getClient", "username": serial}])
