@@ -6,7 +6,7 @@
 # docker/mosquitto.conf). Este script solo garantiza que exista el usuario
 # admin, que es el gateway (MQTT_USERNAME/MQTT_PASSWORD). Todo lo demás —el rol
 # "gateway", la credencial compartida legacy de los dispositivos, una credencial
-# por Raspberry y un rol por serial— lo crea el gateway por
+# por Gateway Edge y un rol por serial— lo crea el gateway por
 # $CONTROL/dynamic-security/v1 una vez que el broker está arriba
 # (app/services/credenciales_mqtt.py): con el broker apagado, mosquitto_ctrl
 # solo puede cambiar contraseñas de clientes que ya existen, no crear roles ni
@@ -41,7 +41,7 @@ else
     exit 1
   fi
   # Ídem para la credencial compartida legacy. Acá y no en el gateway: cambiar
-  # una clave con el broker arriba desconecta a todas las Raspberry que la usan,
+  # una clave con el broker arriba desconecta a todos los Edge que la usan,
   # y al arrancar el broker se reconectan igual. Si todavía no existe, la crea el
   # gateway al conectar (el error "not found" se ignora).
   if [ -n "$MQTT_DEVICE_USERNAME" ] && [ -n "$MQTT_DEVICE_PASSWORD" ]; then

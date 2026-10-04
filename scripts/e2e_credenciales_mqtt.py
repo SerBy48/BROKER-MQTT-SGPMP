@@ -1,15 +1,16 @@
 """E2E de SEG-BROKER-03 (TC-M09-250/251): gateway real contra Mosquitto real.
 
 Usa el cliente MQTT y el servicio de credenciales del gateway contra el broker
-levantado con el docker-compose del repo; la "Raspberry" son los
-mosquitto_pub/sub del host (MQTT v5). No toca la BD: el estado de los seriales
-se toma de E2E_ACTIVOS / E2E_INACTIVO (deben ser seriales válidos). Solo publica
-en `status`, que el gateway no persiste.
+levantado con el docker-compose del repo; el "Gateway Edge" son los
+mosquitto_pub/sub del host (MQTT v5). No toca la BD: la relación Edge ->
+dispositivos (modulo9.dispositivos_iot.id_dispositivo_gateway) se toma de las
+variables E2E_* (deben ser seriales válidos). Solo publica en `status`, que el
+gateway no persiste.
 
     docker compose -p sgpmp-e2e up -d --build mosquitto   # con MQTT_HOST_PORT=1884
     MQTT_HOST=127.0.0.1 MQTT_PORT=1884 \
-    E2E_ACTIVOS=IOT-EST01-HLA-001,IOT-EST02-HLA-002,IOT-ALE01-HLA-003 \
-    E2E_INACTIVO=IOT-CAM01-COR-001 \
+    E2E_EDGE=EDGE-REMANSO-01 E2E_ATENDIDOS=IOT-EST01-HLA-001,IOT-EST02-HLA-002 \
+    E2E_DIRECTO=IOT-ALE01-HLA-003 E2E_INACTIVO=IOT-CAM01-COR-001 \
         .venv/bin/python scripts/e2e_credenciales_mqtt.py
     docker compose -p sgpmp-e2e down -v
 
@@ -24,8 +25,8 @@ import sys
 sys.path.insert(0, os.getcwd())
 
 from app.config import get_settings  # noqa: E402
-from app.db.engine import async_session_factory  # noqa: E402
-from app.db.repositories import registry  # noqa: E402
+from app.core.errors import DeviceDependsOnGatewayError  # noqa: E402
+from app.db.repositories.registry import EstadoDispositivo  # noqa: E402
 from app.mqtt.client import mqtt_gateway  # noqa: E402
 from app.services import credenciales_mqtt as cm  # noqa: E402
 
@@ -70,13 +71,23 @@ def escuchar(user: str, pw: str, topic: str) -> subprocess.Popen:
     )
 
 
-ESTADOS = {s: True for s in os.environ["E2E_ACTIVOS"].split(",")}
-if os.environ.get("E2E_INACTIVO"):
-    ESTADOS[os.environ["E2E_INACTIVO"]] = False
+EDGE = os.environ["E2E_EDGE"]
+ATENDIDOS = os.environ["E2E_ATENDIDOS"].split(",")
+DIRECTO = os.environ["E2E_DIRECTO"]
+INACTIVO = os.environ.get("E2E_INACTIVO")
+
+# modulo9 simulado: serial -> (activo, serial de su Gateway Edge)
+BD = {
+    EDGE: EstadoDispositivo(True, None),
+    DIRECTO: EstadoDispositivo(True, None),
+    **{s: EstadoDispositivo(True, EDGE) for s in ATENDIDOS},
+}
+if INACTIVO:
+    BD[INACTIVO] = EstadoDispositivo(False, None)
 
 
-async def _estado_seriales(_session, seriales=None):
-    return dict(ESTADOS) if seriales is None else {k: ESTADOS[k] for k in seriales if k in ESTADOS}
+async def _mapa(_session):
+    return dict(BD)
 
 
 class _Sesion:
@@ -87,30 +98,15 @@ class _Sesion:
         return False
 
 
-cm.registry.estado_seriales = _estado_seriales
+cm.registry.mapa_dispositivos = _mapa
 cm.async_session_factory = _Sesion
-async_session_factory = _Sesion  # noqa: F811
-registry.estado_seriales = _estado_seriales
 
 
-async def main() -> None:
-    s = get_settings()
-    async with async_session_factory() as session:
-        estados = await registry.estado_seriales(session)
-    activos = sorted(k for k, v in estados.items() if v)
-    inactivos = sorted(k for k, v in estados.items() if not v)
-    principal, adicional, ajeno = activos[0], activos[1], activos[2]
-    print(f"principal={principal} adicional={adicional} ajeno={ajeno} inactivo={inactivos[:1]}\n")
-
-    mqtt_gateway.start()
+async def esperar_gateway_estable(s) -> bool:
     # Primer arranque: el gateway se asigna su rol, Mosquitto lo desconecta y al
-    # reconectar (MQTT_RECONNECT_DELAY) termina de sincronizar. Esperar a que
-    # quede estable: sincronización completa con el rol ya asignado.
-    estable, conexiones = False, set()
+    # reconectar (MQTT_RECONNECT_DELAY) termina de sincronizar.
     for _ in range(100):
         t = mqtt_gateway._sync_task
-        if t is not None:
-            conexiones.add(id(t))
         if t is not None and t.done() and t.exception() is None and mqtt_gateway._client:
             try:
                 (gw,) = await cm.dynsec.ejecutar(
@@ -119,31 +115,35 @@ async def main() -> None:
                 (lc,) = await cm.dynsec.ejecutar([{"command": "listClients"}])
                 roles = {r["rolename"] for r in gw["data"]["client"]["roles"]}
                 if "gateway" in roles and s.mqtt_device_username in lc["data"]["clients"]:
-                    estable = True
-                    break
+                    return True
             except Exception:
                 pass
         await asyncio.sleep(0.2)
-    check(
-        "gateway conecta, se asigna su rol y sincroniza",
-        estable,
-        f"(sincronizaciones: {len(conexiones)})",
-    )
+    return False
 
-    # --- legacy: las Raspberry actuales siguen conectando ---
+
+async def main() -> None:
+    s = get_settings()
+    a1, a2 = ATENDIDOS[0], ATENDIDOS[-1]
+    print(f"Edge={EDGE} atiende={ATENDIDOS} directo={DIRECTO} inactivo={INACTIVO}\n")
+
+    mqtt_gateway.start()
+    check("gateway conecta, se asigna su rol y sincroniza", await esperar_gateway_estable(s))
+
     lu, lp = s.mqtt_device_username, s.mqtt_device_password
     check(
-        "legacy: publica status de cualquier serial (sin cortar a nadie)",
-        "failed" not in pub(lu, lp, f"sgpmp/{principal}/status"),
+        "legacy: publica status (sin cortar a nadie)",
+        "failed" not in pub(lu, lp, f"sgpmp/{a1}/status"),
     )
-    check("legacy: SUBSCRIBE '#' denegado (antes se concedía)", sub_denegado(lu, lp, "#") is True)
+    check("legacy: SUBSCRIBE '#' denegado", sub_denegado(lu, lp, "#") is True)
 
-    # --- credencial propia ---
-    cred = await cm.emitir(principal, [adicional])
+    # --- credencial del Edge ---
+    cred = await cm.emitir(EDGE)
     u, p = cred.usuario, cred.password
+    check("emitir: usuario = serial del Edge", u == EDGE)
     check(
-        "emitir devuelve usuario = serial principal",
-        u == principal and cred.seriales == [principal, adicional],
+        "emitir: cubre el Edge y los dispositivos que atiende (de la BD)",
+        cred.seriales == [EDGE, *sorted(ATENDIDOS)],
     )
 
     check("TC-251: SUBSCRIBE '#' -> SUBACK de fallo", sub_denegado(u, p, "#") is True)
@@ -152,93 +152,105 @@ async def main() -> None:
         sub_denegado(u, p, "sgpmp/+/command") is True,
     )
     check(
-        "TC-251: SUBSCRIBE command de otro serial -> fallo",
-        sub_denegado(u, p, f"sgpmp/{ajeno}/command") is True,
+        "TC-251: command de un dispositivo que no atiende -> fallo",
+        sub_denegado(u, p, f"sgpmp/{DIRECTO}/command") is True,
     )
     check(
-        "SUBSCRIBE su propio command -> concedido",
-        sub_denegado(u, p, f"sgpmp/{principal}/command") is False,
+        "SUBSCRIBE command de un dispositivo que atiende -> concedido",
+        sub_denegado(u, p, f"sgpmp/{a1}/command") is False,
     )
     check(
-        "SUBSCRIBE command del serial adicional -> concedido",
-        sub_denegado(u, p, f"sgpmp/{adicional}/command") is False,
+        "TC-250: publicar en status de un dispositivo ajeno -> Not authorized",
+        "Not authorized" in pub(u, p, f"sgpmp/{DIRECTO}/status"),
+    )
+    check(
+        "TC-250: publicar en command -> Not authorized",
+        "Not authorized" in pub(u, p, f"sgpmp/{a1}/command"),
+    )
+    check(
+        "publicar en status de un dispositivo que atiende -> OK",
+        "failed" not in pub(u, p, f"sgpmp/{a2}/status"),
     )
 
-    check(
-        "TC-250: publicar en status de otro serial -> Not authorized",
-        "Not authorized" in pub(u, p, f"sgpmp/{ajeno}/status"),
-    )
-    check(
-        "TC-250: publicar en command (aunque sea el propio) -> Not authorized",
-        "Not authorized" in pub(u, p, f"sgpmp/{principal}/command"),
-    )
-    check(
-        "publicar en su propio status -> OK", "failed" not in pub(u, p, f"sgpmp/{principal}/status")
-    )
-    check(
-        "publicar en status del serial adicional -> OK",
-        "failed" not in pub(u, p, f"sgpmp/{adicional}/status"),
-    )
-
-    # entrega real: solo recibe sus comandos
-    rasp = escuchar(u, p, f"sgpmp/{principal}/command")
+    # entrega real: el Edge recibe el comando de su dispositivo, no el de uno ajeno
+    edge = escuchar(u, p, f"sgpmp/{a1}/command")
     await asyncio.sleep(0.7)
-    await mqtt_gateway.publish(f"sgpmp/{principal}/command", b'{"para":"propio"}')
-    await mqtt_gateway.publish(f"sgpmp/{ajeno}/command", b'{"para":"ajeno"}')
+    await mqtt_gateway.publish(f"sgpmp/{a1}/command", b'{"para":"atendido"}')
+    await mqtt_gateway.publish(f"sgpmp/{DIRECTO}/command", b'{"para":"ajeno"}')
     await asyncio.sleep(1)
-    rasp.terminate()
-    salida = rasp.communicate()[0]
-    check("recibe el comando del gateway para su serial", "propio" in salida)
-    check("no recibe el comando de otro serial", "ajeno" not in salida)
+    edge.terminate()
+    salida = edge.communicate()[0]
+    check("RF-23: el comando de su dispositivo le llega al Edge", "atendido" in salida)
+    check("no recibe el comando de un dispositivo ajeno", "ajeno" not in salida)
 
-    estado = await cm.consultar(principal)
+    try:
+        await cm.emitir(a1)
+        check("un dispositivo del Edge no tiene credencial propia", False)
+    except DeviceDependsOnGatewayError:
+        check("un dispositivo del Edge no tiene credencial propia", True)
+
+    # --- asignar un dispositivo al Edge y sincronizar SIN rotar la clave ---
     check(
-        "consultar: habilitada",
-        estado is not None and estado.habilitada and estado.seriales == [principal, adicional],
+        "antes de asignarlo, el Edge no puede usar el topic de DIRECTO",
+        sub_denegado(u, p, f"sgpmp/{DIRECTO}/command") is True,
+    )
+    BD[DIRECTO] = EstadoDispositivo(True, EDGE)  # PATCH /{id}/gateway en el backend
+    await cm.sincronizar_credencial(EDGE)
+    check(
+        "asignado + sync: el Edge ya puede usar el topic de DIRECTO, con la MISMA clave",
+        sub_denegado(u, p, f"sgpmp/{DIRECTO}/command") is False,
+    )
+    BD[DIRECTO] = EstadoDispositivo(True, None)
+    await cm.sincronizar_credencial(EDGE)
+    check(
+        "quitado + sync: el Edge vuelve a no poder",
+        sub_denegado(u, p, f"sgpmp/{DIRECTO}/command") is True,
     )
 
-    # --- rotación: la clave vieja deja de servir ---
-    nueva = await cm.emitir(principal, [adicional])
+    # --- rotación ---
+    nueva = await cm.emitir(EDGE)
+    check("rotar: clave vieja rechazada", "Not authorized" in pub(u, p, f"sgpmp/{a1}/status"))
     check(
-        "rotar: clave vieja rechazada",
-        "Not authorized" in pub(u, p, f"sgpmp/{principal}/status")
-        or "refused" in pub(u, p, f"sgpmp/{principal}/status").lower(),
-    )
-    check(
-        "rotar: clave nueva funciona",
-        "failed" not in pub(u, nueva.password, f"sgpmp/{principal}/status"),
+        "rotar: clave nueva funciona", "failed" not in pub(u, nueva.password, f"sgpmp/{a1}/status")
     )
 
-    # --- revocación: desconecta al instante ---
-    rasp = escuchar(u, nueva.password, f"sgpmp/{principal}/command")
+    # --- desactivar un dispositivo del Edge: pierde sus topics ---
+    await cm.revocar(a2)  # lo que hace el backend al desactivarlo
+    check(
+        "dispositivo desactivado: el Edge pierde su topic",
+        sub_denegado(u, nueva.password, f"sgpmp/{a2}/command") is True,
+    )
+    check(
+        "los demás dispositivos del Edge siguen",
+        sub_denegado(u, nueva.password, f"sgpmp/{a1}/command") is False,
+    )
+
+    # --- desactivar el Edge (cascada): desconexión inmediata ---
+    edge = escuchar(u, nueva.password, f"sgpmp/{a1}/command")
     await asyncio.sleep(0.7)
-    await cm.revocar(principal)
+    await cm.revocar(EDGE)
     await asyncio.sleep(1)
-    desconectada = rasp.poll() is not None
-    if not desconectada:
-        rasp.terminate()
+    desconectado = edge.poll() is not None
+    if not desconectado:
+        edge.terminate()
     check(
-        "revocar: la Raspberry conectada queda desconectada",
-        desconectada,
-        (rasp.communicate()[0] or "").strip(),
+        "Edge desactivado: queda desconectado", desconectado, (edge.communicate()[0] or "").strip()
     )
     check(
-        "revocar: no puede volver a conectar",
-        "Not authorized" in pub(u, nueva.password, f"sgpmp/{principal}/status"),
+        "Edge desactivado: no puede volver a conectar",
+        "Not authorized" in pub(u, nueva.password, f"sgpmp/{a1}/status"),
     )
-    estado = await cm.consultar(principal)
-    check("consultar tras revocar: deshabilitada", estado is not None and not estado.habilitada)
 
     # --- reconciliación: credencial de un serial inactivo se corta al reconectar ---
-    if inactivos:
-        viejo = inactivos[0]
-        # se crea "a mano" (como si se hubiera emitido antes de desactivarlo)
-        await cm.dynsec.ejecutar(cm._asegurar_cliente(viejo, "clave-vieja-123", []))
+    if INACTIVO:
+        await cm.dynsec.ejecutar(
+            [{"command": "createClient", "username": INACTIVO, "password": "clave-vieja-123"}]
+        )
         await cm.sincronizar()
-        e = await cm.consultar(viejo)
+        estado = await cm.consultar(INACTIVO)
         check(
-            "reconciliación: serial inactivo en modulo9 -> credencial deshabilitada",
-            e is not None and not e.habilitada,
+            "reconciliación: serial inactivo en modulo9 -> deshabilitada",
+            estado is not None and not estado.habilitada,
         )
 
     await mqtt_gateway.stop()

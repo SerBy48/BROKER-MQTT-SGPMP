@@ -40,6 +40,14 @@ class DeviceInactiveError(SgpmpError):
         super().__init__(f"Dispositivo inactivo: {serial}")
 
 
+class DeviceDependsOnGatewayError(SgpmpError):
+    def __init__(self, serial: str, serial_gateway: str) -> None:
+        super().__init__(
+            f"{serial} se comunica a través de su Gateway Edge {serial_gateway}: "
+            "la credencial MQTT es la del Edge"
+        )
+
+
 class DynsecError(SgpmpError):
     """Mosquitto rechazó o no respondió un comando de dynamic-security."""
 

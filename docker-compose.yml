@@ -61,7 +61,7 @@ services:
       # Volumen nombrado con dynamic-security.json (SEG-BROKER-03): usuarios,
       # roles y hashes de contraseña de todas las credenciales MQTT. Persiste
       # entre reinicios/redeploys. Perderlo obliga a regenerar e instalar la
-      # credencial de cada Raspberry: respaldarlo (Volume Backups de Dokploy).
+      # credencial de cada Gateway Edge: respaldarlo (Volume Backups de Dokploy).
       # Ojo: recrear el compose en Dokploy cambia el appName y con él el nombre
       # del volumen, que arranca vacío.
       - mosquitto_secrets:/mosquitto/secrets

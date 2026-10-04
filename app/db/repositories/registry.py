@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import NamedTuple
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -24,31 +25,32 @@ async def resolve_device_id(session: AsyncSession, serial: str) -> int | None:
     return device_id
 
 
-async def estado_seriales(
-    session: AsyncSession, seriales: list[str] | None = None
-) -> dict[str, bool]:
-    """`serial -> es_activo` de los `seriales` dados (o de todos con None).
+class EstadoDispositivo(NamedTuple):
+    activo: bool
+    serial_gateway: str | None  # Gateway Edge que lo atiende (RF-21), si tiene
+
+
+async def mapa_dispositivos(session: AsyncSession) -> dict[str, EstadoDispositivo]:
+    """`serial -> (es_activo, serial de su Gateway Edge)` de todos los dispositivos.
 
     Un serial que no está en el resultado no existe en modulo9.
     """
-    if seriales is None:
-        result = await session.execute(
-            text("SELECT serial, es_activo FROM modulo9.dispositivos_iot")
+    result = await session.execute(
+        text(
+            "SELECT d.serial, d.es_activo, g.serial "
+            "FROM modulo9.dispositivos_iot d "
+            "LEFT JOIN modulo9.dispositivos_iot g "
+            "  ON g.id_dispositivo_iot = d.id_dispositivo_gateway"
         )
-    else:
-        result = await session.execute(
-            text(
-                "SELECT serial, es_activo FROM modulo9.dispositivos_iot "
-                "WHERE serial = ANY(:seriales)"
-            ),
-            {"seriales": seriales},
-        )
-    return {serial: es_activo for serial, es_activo in result}
+    )
+    return {serial: EstadoDispositivo(activo, gateway) for serial, activo, gateway in result}
 
 
 async def resolve_variable_id(session: AsyncSession, nombre: str) -> int | None:
     result = await session.execute(
-        text("SELECT id_variable_ambiental FROM modulo9.variables_ambientales WHERE nombre = :nombre"),
+        text(
+            "SELECT id_variable_ambiental FROM modulo9.variables_ambientales WHERE nombre = :nombre"
+        ),
         {"nombre": nombre},
     )
     row = result.first()

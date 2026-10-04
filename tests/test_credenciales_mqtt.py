@@ -1,9 +1,9 @@
-"""SEG-BROKER-03 (TC-M09-250/251): credencial MQTT por Raspberry en dynamic-security.
+"""SEG-BROKER-03 (TC-M09-250/251): credencial MQTT del Gateway Edge en dynamic-security.
 
 Con dobles para la BD y para Mosquitto: se verifica QUÉ comandos de
 dynamic-security se mandan. Que Mosquitto 2.1.2 los aplica como se espera (SUBACK
 de fallo con '#', publicación cruzada rechazada, desconexión al revocar) se
-verificó contra el broker real; ver docs/RFC_credencial_mqtt_por_dispositivo.md.
+verifica contra el broker real con scripts/e2e_credenciales_mqtt.py.
 """
 
 from __future__ import annotations
@@ -17,11 +17,13 @@ import pytest
 
 from app.config import get_settings
 from app.core.errors import (
+    DeviceDependsOnGatewayError,
     DeviceInactiveError,
     DeviceNotFoundError,
     DynsecError,
     UsuarioReservadoError,
 )
+from app.db.repositories.registry import EstadoDispositivo as E
 from app.mqtt import dynsec
 from app.services import credenciales_mqtt as cm
 
@@ -54,12 +56,20 @@ class DynsecFalso:
 
 
 @pytest.fixture
-def estados() -> dict[str, bool]:
-    return {"RPI-1": True, "ESP-2": True, "VIEJO": False}
+def bd() -> dict[str, E]:
+    """modulo9: EDGE-1 atiende a ESP-1 y ESP-2 (ESP-3 apagado); SUELTO se conecta directo."""
+    return {
+        "EDGE-1": E(True, None),
+        "ESP-1": E(True, "EDGE-1"),
+        "ESP-2": E(True, "EDGE-1"),
+        "ESP-3": E(False, "EDGE-1"),
+        "SUELTO": E(True, None),
+        "VIEJO": E(False, None),
+    }
 
 
 @pytest.fixture
-def falso(monkeypatch: pytest.MonkeyPatch, estados: dict[str, bool]) -> DynsecFalso:
+def falso(monkeypatch: pytest.MonkeyPatch, bd: dict[str, E]) -> DynsecFalso:
     monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
     monkeypatch.setenv("MQTT_USERNAME", "sgpmp_gateway")
     # vacías y no delenv: Settings también lee el .env local
@@ -71,30 +81,35 @@ def falso(monkeypatch: pytest.MonkeyPatch, estados: dict[str, bool]) -> DynsecFa
     async def sesion_falsa():
         yield object()
 
-    async def estado_seriales(_session, seriales=None):
-        if seriales is None:
-            return dict(estados)
-        return {s: estados[s] for s in seriales if s in estados}
+    async def mapa_dispositivos(_session):
+        return dict(bd)
 
     falso = DynsecFalso()
     monkeypatch.setattr(cm, "async_session_factory", sesion_falsa)
-    monkeypatch.setattr(cm.registry, "estado_seriales", estado_seriales)
+    monkeypatch.setattr(cm.registry, "mapa_dispositivos", mapa_dispositivos)
     monkeypatch.setattr(cm.dynsec, "ejecutar", falso)
     yield falso
     get_settings.cache_clear()
 
 
-async def test_emitir_crea_un_rol_por_serial_solo_con_sus_topics(falso, caplog) -> None:
+def _roles(cliente: dict) -> list[str]:
+    return [r["rolename"] for r in cliente["roles"]]
+
+
+# ── Emitir ──────────────────────────────────────────────────────────────────
+
+
+async def test_emitir_al_edge_le_da_sus_topics_y_los_de_sus_dispositivos(falso, caplog) -> None:
     caplog.set_level(logging.DEBUG)
 
-    credencial = await cm.emitir("RPI-1", ["ESP-2", "RPI-1"])
+    credencial = await cm.emitir("EDGE-1")
 
-    assert credencial.usuario == "RPI-1"
-    assert credencial.seriales == ["RPI-1", "ESP-2"]  # principal primero, sin repetir
+    assert credencial.usuario == "EDGE-1"
+    assert credencial.seriales == ["EDGE-1", "ESP-1", "ESP-2"]  # ESP-3 está apagado
     assert len(credencial.password) >= 32
 
     roles = {c["rolename"]: c for c in falso.de("createRole")}
-    assert set(roles) == {"serial-RPI-1", "serial-ESP-2"}
+    assert set(roles) == {"serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"}
     rol = roles["serial-ESP-2"]
     assert rol["allowwildcardsubs"] is False
     assert {(a["acltype"], a["topic"]) for a in rol["acls"]} == {
@@ -104,45 +119,96 @@ async def test_emitir_crea_un_rol_por_serial_solo_con_sus_topics(falso, caplog) 
         ("subscribeLiteral", "sgpmp/ESP-2/command"),
         ("publishClientReceive", "sgpmp/ESP-2/command"),
     }
-    # ningún topic con comodines: un rol solo abre los topics de SU serial
     topics = [a["topic"] for r in roles.values() for a in r["acls"]]
-    assert not any("+" in t or "#" in t for t in topics)
+    assert not any("+" in t or "#" in t for t in topics)  # un rol abre solo SU serial
 
     (cliente,) = falso.de("modifyClient")
-    assert cliente["username"] == "RPI-1"
-    assert cliente["password"] == credencial.password
-    assert [r["rolename"] for r in cliente["roles"]] == ["serial-RPI-1", "serial-ESP-2"]
-    assert falso.de("enableClient") == [{"command": "enableClient", "username": "RPI-1"}]
+    assert cliente["username"] == "EDGE-1" and cliente["password"] == credencial.password
+    assert _roles(cliente) == ["serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"]
+    assert falso.de("enableClient") == [{"command": "enableClient", "username": "EDGE-1"}]
+    assert credencial.password not in caplog.text  # nunca a los logs
 
-    # la contraseña nunca va a los logs
-    assert credencial.password not in caplog.text
+
+async def test_emitir_a_un_dispositivo_directo_solo_cubre_su_serial(falso) -> None:
+    assert (await cm.emitir("SUELTO")).seriales == ["SUELTO"]
 
 
 async def test_emitir_tolera_que_el_rol_y_el_cliente_ya_existan(falso) -> None:
-    # rotación: Mosquitto contesta "already exists" a los create y modify* actualiza
     falso.errores = {"createRole": "Role already exists", "createClient": "Client already exists"}
-    await cm.emitir("RPI-1")
+    await cm.emitir("EDGE-1")
 
 
 @pytest.mark.parametrize(
-    ("serial", "error"), [("NO-EXISTE", DeviceNotFoundError), ("VIEJO", DeviceInactiveError)]
+    ("serial", "error"),
+    [
+        ("NO-EXISTE", DeviceNotFoundError),
+        ("VIEJO", DeviceInactiveError),
+        ("ESP-1", DeviceDependsOnGatewayError),  # se comunica por su Edge
+        ("sgpmp_gateway", UsuarioReservadoError),  # pisaría al admin
+    ],
 )
-async def test_emitir_solo_para_seriales_activos_de_modulo9(falso, serial, error) -> None:
+async def test_emitir_solo_para_quien_se_conecta_al_broker(falso, serial, error) -> None:
     with pytest.raises(error):
-        await cm.emitir("RPI-1", [serial])
+        await cm.emitir(serial)
     assert falso.lotes == []  # no toca Mosquitto
 
 
-async def test_un_serial_igual_al_usuario_del_gateway_no_puede_pisar_al_admin(falso) -> None:
-    with pytest.raises(UsuarioReservadoError):
-        await cm.emitir("sgpmp_gateway")
-    with pytest.raises(UsuarioReservadoError):
-        await cm.revocar("sgpmp_gateway")
-    assert falso.lotes == []
+async def test_un_serial_legado_con_comodines_no_entra_a_la_acl(falso, bd) -> None:
+    bd["ROTO/+"] = E(True, "EDGE-1")
+    assert (await cm.emitir("EDGE-1")).seriales == ["EDGE-1", "ESP-1", "ESP-2"]
+
+
+# ── Sincronizar (cambio de Edge desde el backend, sin rotar) ────────────────
+
+
+def _edge(*seriales: str, **extra) -> dict:
+    roles = [{"rolename": f"serial-{s}"} for s in seriales]
+    return {"username": "EDGE-1", "roles": roles, **extra}
+
+
+async def test_sincronizar_agrega_el_dispositivo_nuevo_sin_tocar_la_clave(falso) -> None:
+    falso.datos = {
+        "getClient": {"client": _edge("EDGE-1", "ESP-1")},
+        "listRoles": {"roles": ["serial-EDGE-1", "serial-ESP-1"]},
+    }
+
+    assert await cm.sincronizar_credencial("EDGE-1") is True
+
+    assert [c["rolename"] for c in falso.de("createRole")] == ["serial-ESP-2"]
+    (cliente,) = falso.de("modifyClient")
+    assert "password" not in cliente
+    assert _roles(cliente) == ["serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"]
+
+
+async def test_sincronizar_no_escribe_si_ya_esta_alineado(falso) -> None:
+    falso.datos = {
+        "getClient": {"client": _edge("EDGE-1", "ESP-1", "ESP-2")},
+        "listRoles": {"roles": ["serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"]},
+    }
+    await cm.sincronizar_credencial("EDGE-1")
+    assert len(falso.lotes) == 1  # solo la lectura
+
+
+async def test_sincronizar_un_edge_sin_credencial_no_hace_nada(falso) -> None:
+    falso.errores = {"getClient": "Client not found"}
+    assert await cm.sincronizar_credencial("EDGE-1") is False
+    assert len(falso.lotes) == 1
+
+
+async def test_sincronizar_no_reactiva_una_credencial_revocada(falso) -> None:
+    falso.datos = {
+        "getClient": {"client": _edge("EDGE-1", disabled=True)},
+        "listRoles": {"roles": []},
+    }
+    assert await cm.sincronizar_credencial("EDGE-1") is True
+    assert len(falso.lotes) == 1
+
+
+# ── Revocar y consultar ─────────────────────────────────────────────────────
 
 
 async def test_revocar_deshabilita_la_credencial_y_quita_los_topics_del_serial(falso) -> None:
-    falso.errores = {"disableClient": "Client not found"}  # serial que no era principal
+    falso.errores = {"disableClient": "Client not found"}  # un dispositivo de un Edge
 
     await cm.revocar("ESP-2")
 
@@ -160,24 +226,17 @@ async def test_un_error_real_de_mosquitto_no_se_traga(falso) -> None:
 
 async def test_consultar(falso) -> None:
     falso.errores = {"getClient": "Client not found"}
-    assert await cm.consultar("RPI-1") is None
+    assert await cm.consultar("EDGE-1") is None
 
     falso.errores = {}
-    falso.datos = {
-        "getClient": {
-            "client": {
-                "username": "RPI-1",
-                "disabled": True,
-                "roles": [{"rolename": "serial-RPI-1"}, {"rolename": "serial-ESP-2"}],
-                "connections": [],
-            }
-        }
-    }
-    estado = await cm.consultar("RPI-1")
+    falso.datos = {"getClient": {"client": _edge("EDGE-1", "ESP-1", disabled=True, connections=[])}}
+    estado = await cm.consultar("EDGE-1")
     assert estado == cm.EstadoCredencial(
-        usuario="RPI-1", habilitada=False, conectada=False, seriales=["RPI-1", "ESP-2"]
+        usuario="EDGE-1", habilitada=False, conectada=False, seriales=["EDGE-1", "ESP-1"]
     )
 
+
+# ── Sincronización al conectar (reconciliación con modulo9) ─────────────────
 
 GATEWAY_ACLS = [{"acltype": "publishClientSend", "topic": "sgpmp/+/command", "allow": True}]
 GATEWAY = {"username": "sgpmp_gateway", "roles": [{"rolename": "admin"}, {"rolename": "gateway"}]}
@@ -202,6 +261,10 @@ def _legacy(monkeypatch) -> list[dict]:
     return cm._acls_dispositivo(get_settings(), "+", "subscribePattern")
 
 
+def _base(*roles_serial: str) -> list[dict]:
+    return [_rol("admin"), _rol("gateway", GATEWAY_ACLS), *(_rol(r) for r in roles_serial)]
+
+
 async def test_primer_arranque_el_gateway_se_asigna_su_rol_y_espera_la_reconexion(falso) -> None:
     falso.datos = _estado(
         [{"username": "sgpmp_gateway", "roles": [{"rolename": "admin"}]}], [_rol("admin")]
@@ -214,26 +277,20 @@ async def test_primer_arranque_el_gateway_se_asigna_su_rol_y_espera_la_reconexio
     gateway = escrito[1]
     assert gateway["command"] == "modifyClient" and gateway["username"] == "sgpmp_gateway"
     assert "password" not in gateway  # la clave del gateway la rota el entrypoint
-    assert [r["rolename"] for r in gateway["roles"]] == ["admin", "gateway"]
-    # Mosquitto lo desconecta por el cambio de roles: el resto, al reconectar
-    assert len(falso.lotes) == 2
+    assert _roles(gateway) == ["admin", "gateway"]
+    assert len(falso.lotes) == 2  # Mosquitto lo desconecta: el resto, al reconectar
 
 
 async def test_en_regimen_no_reescribe_nada_que_ya_este_bien(falso, monkeypatch) -> None:
     """modifyClient/modifyRole desconectan aunque no cambie nada (Mosquitto 2.1.2):
-    reescribir en cada conexión expulsaría al gateway y a las Raspberry legacy."""
+    reescribir en cada conexión expulsaría al gateway y a los Edge."""
     legacy_acls = _legacy(monkeypatch)
+    legacy = {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]}
     falso.datos = _estado(
+        [GATEWAY, legacy, _edge("EDGE-1", "ESP-1", "ESP-2")],
         [
-            GATEWAY,
-            {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]},
-            {"username": "RPI-1", "roles": [{"rolename": "serial-RPI-1"}]},
-        ],
-        [
-            _rol("admin"),
-            _rol("gateway", GATEWAY_ACLS),
+            *_base("serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"),
             _rol("dispositivos_legacy", legacy_acls),
-            _rol("serial-RPI-1"),
         ],
     )
 
@@ -242,22 +299,67 @@ async def test_en_regimen_no_reescribe_nada_que_ya_este_bien(falso, monkeypatch)
     assert len(falso.lotes) == 1  # solo la lectura
 
 
+async def test_reconcilia_cada_edge_con_los_dispositivos_que_atiende(falso) -> None:
+    # A EDGE-1 le falta ESP-2 (se le asignó con el broker caído)
+    falso.datos = _estado(
+        [GATEWAY, _edge("EDGE-1", "ESP-1")], _base("serial-EDGE-1", "serial-ESP-1")
+    )
+
+    await cm.sincronizar()
+
+    assert [c["rolename"] for c in falso.de("createRole")] == ["serial-ESP-2"]
+    (cliente,) = falso.de("modifyClient")
+    assert cliente["username"] == "EDGE-1" and "password" not in cliente
+    assert _roles(cliente) == ["serial-EDGE-1", "serial-ESP-1", "serial-ESP-2"]
+
+
+async def test_reconcilia_inactivos_y_dispositivos_que_pasaron_a_un_edge(falso) -> None:
+    falso.datos = _estado(
+        [
+            GATEWAY,
+            # ESP-1 tenía credencial propia y después se le asignó un Edge
+            {"username": "ESP-1", "roles": [{"rolename": "serial-ESP-1"}]},
+            {"username": "VIEJO", "roles": [{"rolename": "serial-VIEJO"}]},
+            {"username": "NO-EXISTE", "roles": [], "disabled": True},  # ya deshabilitado
+        ],
+        _base("serial-ESP-1", "serial-VIEJO", "serial-ESP-3"),
+    )
+
+    await cm.sincronizar()
+
+    assert {c["username"] for c in falso.de("disableClient")} == {"ESP-1", "VIEJO"}
+    assert {c["rolename"] for c in falso.de("deleteRole")} == {"serial-VIEJO", "serial-ESP-3"}
+    assert falso.de("deleteClient") == []
+
+
+async def test_sin_legacy_retira_la_credencial_compartida(falso) -> None:
+    legacy = {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]}
+    falso.datos = _estado([GATEWAY, legacy], [*_base(), _rol("dispositivos_legacy")])
+
+    await cm.sincronizar()
+
+    assert falso.de("createClient") == []
+    assert falso.de("deleteClient") == [{"command": "deleteClient", "username": "sgpmp_devices"}]
+    assert falso.de("deleteRole") == [{"command": "deleteRole", "rolename": "dispositivos_legacy"}]
+
+
 async def test_legacy_se_crea_si_falta_pero_su_clave_no_se_rota_en_caliente(
     falso, monkeypatch
 ) -> None:
     _legacy(monkeypatch)
-    falso.datos = _estado([GATEWAY], [_rol("admin"), _rol("gateway", GATEWAY_ACLS)])
+    falso.datos = _estado([GATEWAY], _base())
 
     await cm.sincronizar()
 
     assert [c["rolename"] for c in falso.de("createRole")] == ["dispositivos_legacy"]
-    (legacy,) = falso.de("createClient")
-    assert legacy == {
-        "command": "createClient",
-        "username": "sgpmp_devices",
-        "password": "clave-legacy",
-        "roles": [{"rolename": "dispositivos_legacy"}],
-    }
+    assert falso.de("createClient") == [
+        {
+            "command": "createClient",
+            "username": "sgpmp_devices",
+            "password": "clave-legacy",
+            "roles": [{"rolename": "dispositivos_legacy"}],
+        }
+    ]
     assert falso.de("modifyClient") == []
 
 
@@ -272,36 +374,7 @@ async def test_un_rol_con_acls_distintas_se_corrige(falso) -> None:
     ]
 
 
-async def test_reconcilia_con_modulo9(falso) -> None:
-    falso.datos = _estado(
-        [
-            GATEWAY,
-            {"username": "RPI-1", "roles": [{"rolename": "serial-RPI-1"}]},
-            {"username": "VIEJO", "roles": [{"rolename": "serial-VIEJO"}]},
-            {"username": "NO-EXISTE", "roles": [], "disabled": True},  # ya deshabilitado
-        ],
-        [_rol("admin"), _rol("gateway", GATEWAY_ACLS), _rol("serial-RPI-1"), _rol("serial-VIEJO")],
-    )
-
-    await cm.sincronizar()
-
-    # VIEJO está inactivo en modulo9: su credencial y sus topics se cortan
-    assert falso.de("disableClient") == [{"command": "disableClient", "username": "VIEJO"}]
-    assert falso.de("deleteRole") == [{"command": "deleteRole", "rolename": "serial-VIEJO"}]
-    assert falso.de("deleteClient") == []
-
-
-async def test_sin_legacy_retira_la_credencial_compartida(falso) -> None:
-    falso.datos = _estado(
-        [GATEWAY, {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]}],
-        [_rol("admin"), _rol("gateway", GATEWAY_ACLS), _rol("dispositivos_legacy")],
-    )
-
-    await cm.sincronizar()
-
-    assert falso.de("createClient") == []
-    assert falso.de("deleteClient") == [{"command": "deleteClient", "username": "sgpmp_devices"}]
-    assert falso.de("deleteRole") == [{"command": "deleteRole", "rolename": "dispositivos_legacy"}]
+# ── Cliente de $CONTROL ──────────────────────────────────────────────────────
 
 
 async def test_dynsec_correlaciona_la_respuesta_con_su_lote(monkeypatch) -> None:

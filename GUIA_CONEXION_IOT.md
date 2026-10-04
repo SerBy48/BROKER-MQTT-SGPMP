@@ -24,22 +24,34 @@ valores concretos de cada ambiente.
 | Host | `<host del ambiente — ver guía privada>` |
 | Puerto MQTT (TCP) | `<MQTT_HOST_PORT del ambiente>` — `mqtt` en dev, `mqtts` en test/prod |
 | Puerto MQTT (WebSocket) | `<MQTT_WS_HOST_PORT del ambiente>` — `ws` en dev, `wss` en test/prod |
-| Usuario | El **serial principal** de la Raspberry (el primero de `EDGE_SERIALS`) |
-| Contraseña | La genera la plataforma para esa Raspberry (ver abajo); se muestra una sola vez |
+| Usuario | El serial del **Gateway Edge** (registrado en la plataforma con ese tipo) |
+| Contraseña | La genera la plataforma para ese Edge (ver abajo); se muestra una sola vez |
 | TLS | `dev` no tiene TLS (texto plano). **En `test`/`prod` el TLS es obligatorio** (TC-M09-253): los puertos publicados hablan solo `mqtts`/`wss`, con los mismos números de siempre; una conexión en texto plano no conecta. Confirmar el puerto en la guía privada del ambiente. |
 
-**Una credencial por Raspberry** (TC-M09-250/251, SEG-BROKER-03). Se genera en
-la plataforma, en el detalle del dispositivo IoT → "Credencial MQTT", indicando
-también los demás seriales que esa Raspberry transmite si los hay (modelo
-"serial por ESP32"). La credencial solo puede publicar en
-`telemetry`/`heartbeat`/`status` y suscribirse a `command` **de sus seriales**:
-cualquier otro topic se rechaza (un `SUBSCRIBE #` recibe un SUBACK de fallo).
-Rotarla invalida la clave anterior; revocarla desconecta a la Raspberry en el
-acto. Desactivar el dispositivo en la plataforma también la revoca.
+**Una credencial por Gateway Edge** (TC-M09-250/251, SEG-BROKER-03). El
+**Gateway Edge** es la computadora de borde del sitio (hoy una Raspberry): recibe
+por radio los datos de los dispositivos y es lo único que se conecta al broker.
+En la plataforma se registra como un dispositivo de tipo **Gateway Edge**, y cada
+dispositivo que atiende (un ESP32 u otro hardware) se registra apuntando a él.
+
+La credencial se genera en la fila del Edge (Configuración → IoT → finca → área
+→ "Credencial MQTT") y cubre el serial del Edge y los de todos los dispositivos
+activos que lo apuntan. Solo puede publicar en `telemetry`/`heartbeat`/`status`
+y suscribirse a `command` **de esos seriales**: cualquier otro topic se rechaza
+(un `SUBSCRIBE #` recibe un SUBACK de fallo).
+
+- **Asignar o quitar un dispositivo** del Edge en la plataforma actualiza sus
+  permisos **sin cambiar la clave**. En el Edge hay que agregar el serial a
+  `EDGE_SERIALS` y el nodo de radio a `EDGE_LORA_NODES`.
+- **Rotar** invalida la clave anterior (hay que actualizar `edge-agent.env`).
+- **Revocar o desactivar el Edge** lo desconecta en el acto; desactivarlo
+  desactiva también a sus dispositivos.
+- Un dispositivo **sin** Edge que se conecte directo al broker también puede
+  tener su propia credencial; uno que depende de un Edge, no.
 
 Mientras dura la migración sigue existiendo la credencial **compartida**
 `sgpmp_devices` (guía privada del ambiente) con los permisos de siempre, para
-que las Raspberry que todavía no tienen la suya no se corten. Se retira cuando
+que los Edge que todavía no tienen la suya no se corten. Se retira cuando
 todas migraron; desde ahí solo conectan las credenciales propias.
 
 ### HTTP (solo si necesitan probar el API del gateway directamente — normalmente no aplica al firmware)
@@ -102,7 +114,7 @@ exista todavía, pídelo (ver sección 5).
 ## 4. Limitaciones conocidas (léelo antes de reportar como bug)
 
 - **La credencial compartida `sgpmp_devices` sigue abierta hasta que todas
-  las Raspberry migren.** Con ella todavía se puede leer el `command` de otro
+  los Edge migren.** Con ella todavía se puede leer el `command` de otro
   serial (TC-M09-250/251); con una credencial propia no. Diseño y mediciones en
   [`docs/RFC_credencial_mqtt_por_dispositivo.md`](./docs/RFC_credencial_mqtt_por_dispositivo.md).
 - **`dev` no tiene TLS; `test`/`prod` solo aceptan TLS.** En `dev` el

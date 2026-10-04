@@ -1,31 +1,38 @@
-"""Credenciales MQTT por Raspberry en dynamic-security (SEG-BROKER-03, TC-M09-250/251).
+"""Credenciales MQTT del Gateway Edge en dynamic-security (SEG-BROKER-03, TC-M09-250/251).
 
 Modelo (ver docs/RFC_credencial_mqtt_por_dispositivo.md):
 
-- Una credencial por Raspberry, que es una sola conexión MQTT aunque transmita
-  por varios seriales (EDGE_SERIALS del edge_agent). Usuario = serial principal.
-- Un rol `serial-<S>` por cada serial, con permiso solo sobre sus topics. Un
-  SUBSCRIBE '#' o sobre otro serial recibe SUBACK de fallo; publicar en el topic
-  de otro serial se rechaza (verificado contra Mosquitto 2.1.2).
-- Rol `gateway` para publicar comandos; el resto lo da el rol `admin` que crea
-  `mosquitto_ctrl dynsec init` para MQTT_USERNAME (ver el entrypoint).
-- Rol `dispositivos_legacy`: la ACL de la credencial compartida MQTT_DEVICE_*,
-  solo mientras las Raspberry migran.
+- El Gateway Edge (la computadora de borde del sitio, el "Gateway IoT" de M03)
+  es un dispositivo de tipo GATEWAY_EDGE en modulo9.dispositivos_iot, y cada
+  dispositivo que atiende apunta a él con ``id_dispositivo_gateway`` (N:1).
+- Se conecta al broker quien no depende de un Edge: el Edge, o un dispositivo
+  que se conecta directo. Su credencial: usuario = su serial.
+- Un rol ``serial-<S>`` por serial, con permiso solo sobre sus topics. La
+  credencial del Edge lleva su rol y el de cada dispositivo activo que atiende,
+  leídos de la BD. Un SUBSCRIBE '#' o sobre otro serial recibe SUBACK de fallo;
+  publicar en el topic de otro serial se rechaza (verificado contra 2.1.2).
+- Rol ``gateway`` para publicar comandos; el resto lo da el rol ``admin`` que
+  crea ``mosquitto_ctrl dynsec init`` para MQTT_USERNAME (ver el entrypoint).
+- Rol ``dispositivos_legacy``: la ACL de la credencial compartida MQTT_DEVICE_*,
+  solo mientras los Edge migran.
 
-La BD manda: solo se emiten credenciales para seriales activos de
-modulo9.dispositivos_iot y, cada vez que el gateway conecta, se deshabilitan las
-de seriales inactivos (por si la revocación que hace el backend al desactivar un
-dispositivo falló).
+La BD manda: cada vez que el gateway conecta (``sincronizar``) se deshabilitan
+las credenciales de seriales inactivos o que pasaron a depender de un Edge, se
+borran los roles de seriales inactivos y los roles de cada Edge se alinean con
+los dispositivos que atiende. El backend avisa los cambios de Edge con
+``sincronizar_credencial`` para no esperar a la próxima reconexión.
 """
 
 from __future__ import annotations
 
 import logging
+import re
 import secrets
 from dataclasses import dataclass
 
 from app.config import Settings, get_settings
 from app.core.errors import (
+    DeviceDependsOnGatewayError,
     DeviceInactiveError,
     DeviceNotFoundError,
     DynsecError,
@@ -33,7 +40,9 @@ from app.core.errors import (
 )
 from app.db.engine import async_session_factory
 from app.db.repositories import registry
+from app.db.repositories.registry import EstadoDispositivo
 from app.mqtt import dynsec
+from app.schemas import PATRON_SERIAL
 
 logger = logging.getLogger(__name__)
 
@@ -84,27 +93,12 @@ def _acls_dispositivo(settings: Settings, serial: str, suscripcion: str) -> list
     ]
 
 
-def _asegurar_rol(nombre: str, acls: list[dict], **extra) -> list[dict]:
-    # createRole falla con "Role already exists" si ya está; modifyRole deja las
-    # ACL al día en ambos casos (y desconecta a quien tenga el rol, ver sincronizar).
-    rol = {"rolename": nombre, "acls": acls, **extra}
-    return [{"command": "createRole", **rol}, {"command": "modifyRole", **rol}]
-
-
-def _asegurar_cliente(usuario: str, password: str, roles: list[str]) -> list[dict]:
-    # Igual que _asegurar_rol: createClient si es nuevo; modifyClient rota la
-    # clave y reemplaza los roles si ya existía (y lo desconecta, que al rotar es lo
-    # que se quiere); enableClient por si estaba revocado.
-    cliente = {
-        "username": usuario,
-        "password": password,
-        "roles": [{"rolename": r} for r in roles],
+def _rol_de_serial(settings: Settings, serial: str) -> dict:
+    return {
+        "rolename": rol_serial(serial),
+        "acls": _acls_dispositivo(settings, serial, "subscribeLiteral"),
+        "allowwildcardsubs": False,
     }
-    return [
-        {"command": "createClient", **cliente},
-        {"command": "modifyClient", **cliente},
-        {"command": "enableClient", "username": usuario},
-    ]
 
 
 def _verificar(respuestas: list[dict], ignorables: frozenset[str] = frozenset()) -> None:
@@ -131,14 +125,72 @@ def _firma(acls: list[dict]) -> set[tuple]:
     return {(a["acltype"], a["topic"], a["allow"]) for a in acls}
 
 
+async def _mapa() -> dict[str, EstadoDispositivo]:
+    async with async_session_factory() as session:
+        return await registry.mapa_dispositivos(session)
+
+
+def _seriales_de_la_credencial(serial: str, mapa: dict[str, EstadoDispositivo]) -> list[str]:
+    """El serial propio y, si es un Edge, los dispositivos activos que atiende.
+
+    Los atendidos salen de la BD, no de una petición validada: un serial legado
+    con '+', '#' o '/' abriría topics ajenos dentro de la ACL, así que se omite.
+    """
+    atendidos = []
+    for s, e in sorted(mapa.items()):
+        if not (e.activo and e.serial_gateway == serial):
+            continue
+        if re.fullmatch(PATRON_SERIAL, s):
+            atendidos.append(s)
+        else:
+            logger.warning("Serial %r con formato inválido: no entra a la ACL de %s", s, serial)
+    return [serial, *atendidos]
+
+
+def _se_conecta_directo(serial: str, mapa: dict[str, EstadoDispositivo]) -> bool:
+    estado = mapa.get(serial)
+    return estado is not None and estado.activo and estado.serial_gateway is None
+
+
+def _alinear_roles(
+    settings: Settings,
+    usuario: str,
+    cliente: dict,
+    roles_existentes: set[str],
+    seriales: list[str],
+) -> list[dict]:
+    """Comandos para que el cliente tenga exactamente el rol de cada serial.
+
+    Solo crea los roles que faltan y solo modifica el cliente si sus roles
+    difieren: cambiarle los roles lo desconecta (se reconecta solo, con la misma
+    clave) y modifyRole desconecta a quien tenga el rol.
+    """
+    comandos = [
+        {"command": "createRole", **_rol_de_serial(settings, s)}
+        for s in seriales
+        if rol_serial(s) not in roles_existentes
+    ]
+    deseados = [rol_serial(s) for s in seriales]
+    actuales = {r for r in _roles_de(cliente) if r.startswith(_PREFIJO_ROL_SERIAL)}
+    if actuales != set(deseados):
+        comandos.append(
+            {
+                "command": "modifyClient",
+                "username": usuario,
+                "roles": [{"rolename": r} for r in deseados],
+            }
+        )
+    return comandos
+
+
 async def sincronizar() -> None:
     """Deja dynamic-security al día y lo reconcilia con modulo9.
 
     Corre en cada conexión del gateway. Lee el estado y escribe solo lo que
     difiere: en Mosquitto 2.1.2 modifyClient y setClientPassword desconectan al
     cliente aunque no cambie nada, y modifyRole desconecta a quien tenga ese rol
-    (medido). Reescribir todo en cada conexión expulsaría al gateway y a las
-    Raspberry legacy una y otra vez.
+    (medido). Reescribir todo en cada conexión expulsaría al gateway y a los
+    Edge una y otra vez.
     """
     settings = get_settings()
     p = settings.mqtt_topic_prefix
@@ -180,7 +232,7 @@ async def sincronizar() -> None:
 
     if legacy and settings.mqtt_device_username not in clientes:
         # Solo el alta: si ya existe, su clave la rota el entrypoint con el broker
-        # apagado (rotarla acá desconectaría a todas las Raspberry legacy).
+        # apagado (rotarla acá desconectaría a todos los Edge legacy).
         comandos.append(
             {
                 "command": "createClient",
@@ -190,19 +242,29 @@ async def sincronizar() -> None:
             }
         )
 
-    # La BD manda: credencial de un serial inactivo o inexistente, deshabilitada;
-    # rol de un serial inactivo, borrado (le quita esos topics a quien los tenga).
-    async with async_session_factory() as session:
-        estados = await registry.estado_seriales(session)
-    activos = {serial for serial, activo in estados.items() if activo}
+    # La BD manda.
+    mapa = await _mapa()
+    activos = {serial for serial, estado in mapa.items() if estado.activo}
+    roles_existentes = set(roles)
     for usuario, cliente in clientes.items():
         if usuario == settings.mqtt_username:
             continue
         if ROL_LEGACY in _roles_de(cliente):
             if not legacy:
                 comandos.append({"command": "deleteClient", "username": usuario})
-        elif usuario not in activos and not cliente.get("disabled"):
-            comandos.append({"command": "disableClient", "username": usuario})
+            continue
+        if not _se_conecta_directo(usuario, mapa):
+            # Inactivo, inexistente o pasó a depender de un Edge: sin credencial propia.
+            if not cliente.get("disabled"):
+                comandos.append({"command": "disableClient", "username": usuario})
+            continue
+        if cliente.get("disabled"):
+            continue  # revocada a propósito: no se reactiva sola
+        alinear = _alinear_roles(
+            settings, usuario, cliente, roles_existentes, _seriales_de_la_credencial(usuario, mapa)
+        )
+        roles_existentes |= {c["rolename"] for c in alinear if c["command"] == "createRole"}
+        comandos += alinear
     for nombre in roles:
         inactivo = nombre.startswith(_PREFIJO_ROL_SERIAL) and (
             nombre.removeprefix(_PREFIJO_ROL_SERIAL) not in activos
@@ -219,41 +281,78 @@ async def sincronizar() -> None:
     )
 
 
-async def emitir(serial: str, adicionales: list[str] | None = None) -> CredencialEmitida:
-    """Crea o rota la credencial de la Raspberry `serial` para ella y sus `adicionales`.
+def _validar_conexion_propia(serial: str, mapa: dict[str, EstadoDispositivo]) -> None:
+    estado = mapa.get(serial)
+    if estado is None:
+        raise DeviceNotFoundError(serial)
+    if not estado.activo:
+        raise DeviceInactiveError(serial)
+    if estado.serial_gateway is not None:
+        raise DeviceDependsOnGatewayError(serial, estado.serial_gateway)
+
+
+async def emitir(serial: str) -> CredencialEmitida:
+    """Crea o rota la credencial de `serial` (un Edge o un dispositivo que se
+    conecta directo) con permiso sobre sus topics y los de los dispositivos que
+    atiende según modulo9.
 
     Devuelve la contraseña una sola vez: no se guarda en ningún lado salvo su
     hash dentro de dynamic-security.json. Rotar invalida la clave anterior.
     """
     settings = get_settings()
-    seriales = list(dict.fromkeys([serial, *(adicionales or [])]))  # principal primero
+    _rechazar_reservado(settings, serial)
+    mapa = await _mapa()
+    _validar_conexion_propia(serial, mapa)
+    seriales = _seriales_de_la_credencial(serial, mapa)
     for s in seriales:
         _rechazar_reservado(settings, s)
 
-    async with async_session_factory() as session:
-        estados = await registry.estado_seriales(session, seriales)
-    for s in seriales:
-        if s not in estados:
-            raise DeviceNotFoundError(s)
-        if not estados[s]:
-            raise DeviceInactiveError(s)
-
-    # ponytail: no se quita el rol serial-<S> de otra Raspberry que lo tuviera
-    # (mover un nodo de Raspberry); se revoca aparte. Agregar si pasa seguido.
     password = secrets.token_urlsafe(24)
-    comandos = [
-        c
-        for s in seriales
-        for c in _asegurar_rol(
-            rol_serial(s),
-            _acls_dispositivo(settings, s, "subscribeLiteral"),
-            allowwildcardsubs=False,
-        )
+    comandos = []
+    for s in seriales:
+        rol = _rol_de_serial(settings, s)
+        # createRole falla con "Role already exists" si ya está; modifyRole deja las
+        # ACL al día (y desconecta a quien tenga el rol, que al rotar es lo que se quiere).
+        comandos += [{"command": "createRole", **rol}, {"command": "modifyRole", **rol}]
+    cliente = {
+        "username": serial,
+        "password": password,
+        "roles": [{"rolename": rol_serial(s)} for s in seriales],
+    }
+    comandos += [
+        {"command": "createClient", **cliente},
+        {"command": "modifyClient", **cliente},  # si ya existía: rota y reemplaza roles
+        {"command": "enableClient", "username": serial},  # por si estaba revocada
     ]
-    comandos += _asegurar_cliente(serial, password, [rol_serial(s) for s in seriales])
     _verificar(await dynsec.ejecutar(comandos), _YA_EXISTE)
     logger.info("Credencial MQTT emitida para %s (seriales=%s)", serial, seriales)
     return CredencialEmitida(usuario=serial, password=password, seriales=seriales)
+
+
+async def sincronizar_credencial(serial: str) -> bool:
+    """Alinea los topics de la credencial de `serial` con modulo9 sin rotar la clave.
+
+    False si `serial` no tiene credencial propia (no hay nada que sincronizar).
+    """
+    settings = get_settings()
+    _rechazar_reservado(settings, serial)
+    cliente, lista_roles = await dynsec.ejecutar(
+        [{"command": "getClient", "username": serial}, {"command": "listRoles"}]
+    )
+    if cliente.get("error") == "Client not found":
+        return False
+    _verificar([cliente, lista_roles])
+    mapa = await _mapa()
+    datos = cliente["data"]["client"]
+    if datos.get("disabled") or not _se_conecta_directo(serial, mapa):
+        return True  # revocada o sin conexión propia: lo resuelve la reconciliación
+    roles_existentes = set(lista_roles["data"]["roles"])
+    seriales = _seriales_de_la_credencial(serial, mapa)
+    comandos = _alinear_roles(settings, serial, datos, roles_existentes, seriales)
+    if comandos:
+        _verificar(await dynsec.ejecutar(comandos), _YA_EXISTE)
+        logger.info("Credencial MQTT de %s sincronizada con modulo9", serial)
+    return True
 
 
 async def consultar(serial: str) -> EstadoCredencial | None:
@@ -277,7 +376,7 @@ async def consultar(serial: str) -> EstadoCredencial | None:
 
 async def revocar(serial: str) -> None:
     """Deshabilita la credencial de `serial` (y la desconecta en el acto) y le
-    quita sus topics a cualquier Raspberry que transmita por él. Idempotente."""
+    quita sus topics a cualquier Edge que lo atienda. Idempotente."""
     _rechazar_reservado(get_settings(), serial)
     respuestas = await dynsec.ejecutar(
         [
