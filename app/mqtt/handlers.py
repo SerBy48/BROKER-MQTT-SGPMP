@@ -7,12 +7,17 @@ import logging
 
 from app.config import get_settings
 from app.core.errors import SgpmpError
+from app.mqtt import dynsec
 from app.services import ingest
 
 logger = logging.getLogger(__name__)
 
 
 async def handle_message(topic: str, payload: bytes) -> None:
+    if topic == dynsec.TOPIC_RESPUESTA:
+        dynsec.resolver_respuesta(payload)
+        return
+
     settings = get_settings()
     parts = topic.split("/")
     if len(parts) < 3:

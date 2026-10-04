@@ -1,3 +1,45 @@
+## [0.2.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.8...v0.2.0-rc.9) (2026-10-04)
+
+### Features
+
+* **rf23:** PENDIENTE al instante si el Gateway Edge no esta conectado al broker ([9213907](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/9213907fd896777642918aa695a56c24ee5920bb))
+
+## [0.2.0-rc.8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.7...v0.2.0-rc.8) (2026-10-04)
+
+### Bug Fixes
+
+* **heartbeat:** guardar estado_local_buffer en la columna "char" de modulo3.heartbeats ([270f70a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/270f70ade9a8a9ab033804ad3c2fd85cdbeed50e))
+
+## [0.2.0-rc.7](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.6...v0.2.0-rc.7) (2026-10-04)
+
+### Features
+
+* **rf23:** credencial del Gateway Edge con los seriales que atiende segun modulo9 (TC-M09-250/251) ([04bb366](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/04bb36671af2d80e158235701af56f6fd125dcf2))
+* **rf23:** credencial MQTT por Raspberry con dynamic-security (TC-M09-250/251) ([94f0387](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/94f03875f58583cce8da24c23215b7d153612ff3))
+* **rf23:** id_comando y emitido_en en comandos y validacion del ACK (TC-M09-G127) ([e2a7294](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/e2a7294f049204a9e7a630eb8b3dd10e1e11d272))
+
+### Bug Fixes
+
+* **rf23:** exponer solo listeners TLS cuando el ambiente lo exige (TC-M09-G127) ([bd1910f](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/bd1910f7311ca0355e7a9c69953f7ae27d995fc7))
+
+## [0.2.0-rc.6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.5...v0.2.0-rc.6) (2026-09-21)
+
+### Bug Fixes
+
+* **dokploy:** comentar puertos tls por defecto para evitar colision en 8883 ([32644e8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/32644e84834ad50a4527e13a11ef32dfc33fa201))
+
+## [0.2.0-rc.5](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.4...v0.2.0-rc.5) (2026-09-17)
+
+### Bug Fixes
+
+* **mosquitto:** agregar acl_file con privilegio minimo por usuario ([869a315](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/869a315d74f99ba6d956608078fd94851c3bf61d))
+
+## [0.2.0-rc.4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.3...v0.2.0-rc.4) (2026-09-16)
+
+### Bug Fixes
+
+* **mosquitto:** soportar listeners TLS (mqtts/wss) en el broker ([741c065](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/741c065716ea252dcac3426730e4a8735962d9bd))
+
 ## [0.2.0-rc.3](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.2...v0.2.0-rc.3) (2026-09-04)
 
 ### Features

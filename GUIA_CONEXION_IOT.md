@@ -22,15 +22,37 @@ valores concretos de cada ambiente.
 | Dato | Valor |
 |---|---|
 | Host | `<host del ambiente — ver guía privada>` |
-| Puerto MQTT (TCP) | `<MQTT_HOST_PORT del ambiente>` |
-| Puerto MQTT (WebSocket) | `<MQTT_WS_HOST_PORT del ambiente>` |
-| Usuario | `sgpmp_devices` (mismo nombre en todos los ambientes; la contraseña cambia por ambiente) |
-| Contraseña | `<ver guía privada del ambiente>` |
-| TLS | Depende del ambiente — confirmar en la guía privada. `dev` no tiene TLS. |
+| Puerto MQTT (TCP) | `<MQTT_HOST_PORT del ambiente>` — `mqtt` en dev, `mqtts` en test/prod |
+| Puerto MQTT (WebSocket) | `<MQTT_WS_HOST_PORT del ambiente>` — `ws` en dev, `wss` en test/prod |
+| Usuario | El serial del **Gateway Edge** (registrado en la plataforma con ese tipo) |
+| Contraseña | La genera la plataforma para ese Edge (ver abajo); se muestra una sola vez |
+| TLS | `dev` no tiene TLS (texto plano). **En `test`/`prod` el TLS es obligatorio** (TC-M09-253): los puertos publicados hablan solo `mqtts`/`wss`, con los mismos números de siempre; una conexión en texto plano no conecta. Confirmar el puerto en la guía privada del ambiente. |
 
-Esta es una credencial **compartida por todos los dispositivos** — el
-`serial` que va en el topic es lo que identifica a cada uno, no la
-credencial de conexión (ver sección de limitaciones más abajo).
+**Una credencial por Gateway Edge** (TC-M09-250/251, SEG-BROKER-03). El
+**Gateway Edge** es la computadora de borde del sitio (hoy una Raspberry): recibe
+por radio los datos de los dispositivos y es lo único que se conecta al broker.
+En la plataforma se registra como un dispositivo de tipo **Gateway Edge**, y cada
+dispositivo que atiende (un ESP32 u otro hardware) se registra apuntando a él.
+
+La credencial se genera en la fila del Edge (Configuración → IoT → finca → área
+→ "Credencial MQTT") y cubre el serial del Edge y los de todos los dispositivos
+activos que lo apuntan. Solo puede publicar en `telemetry`/`heartbeat`/`status`
+y suscribirse a `command` **de esos seriales**: cualquier otro topic se rechaza
+(un `SUBSCRIBE #` recibe un SUBACK de fallo).
+
+- **Asignar o quitar un dispositivo** del Edge en la plataforma actualiza sus
+  permisos **sin cambiar la clave**. En el Edge hay que agregar el serial a
+  `EDGE_SERIALS` y el nodo de radio a `EDGE_LORA_NODES`.
+- **Rotar** invalida la clave anterior (hay que actualizar `edge-agent.env`).
+- **Revocar o desactivar el Edge** lo desconecta en el acto; desactivarlo
+  desactiva también a sus dispositivos.
+- Un dispositivo **sin** Edge que se conecte directo al broker también puede
+  tener su propia credencial; uno que depende de un Edge, no.
+
+Mientras dura la migración sigue existiendo la credencial **compartida**
+`sgpmp_devices` (guía privada del ambiente) con los permisos de siempre, para
+que los Edge que todavía no tienen la suya no se corten. Se retira cuando
+todas migraron; desde ahí solo conectan las credenciales propias.
 
 ### HTTP (solo si necesitan probar el API del gateway directamente — normalmente no aplica al firmware)
 
@@ -58,22 +80,27 @@ Los contratos de payload completos (telemetría, heartbeat, comando, ACK)
 están en `INTEGRACION_DISPOSITIVOS_RF23.md` y en el `README.md` de este
 repo — no se repiten acá para no tener dos fuentes de verdad desincronizadas.
 
+**Novedad (TC-M09-252):** el comando trae `id_comando` y `emitido_en`, y el
+dispositivo debe devolver `id_comando` en el ACK y no re-aplicar un comando ya
+procesado. Detalle y motivo en `INTEGRACION_DISPOSITIVOS_RF23.md`, pasos 2 y 3.
+
 ---
 
 ## 3. Probar la conexión sin hardware real
 
 Con cualquier cliente MQTT (`mosquitto_pub`/`mosquitto_sub`, MQTT Explorer,
-etc.), usando las credenciales de la guía privada del ambiente:
+etc.), con la credencial generada para ese serial. Usar MQTT v5 (`-V mqttv5`):
+en v3.1.1 un publish rechazado igual responde "OK" y engaña.
 
 ```bash
 # Suscribirse a comandos de un dispositivo de prueba
-mosquitto_sub -h <host> -p <puerto> \
-  -u sgpmp_devices -P '<contraseña>' \
+mosquitto_sub -h <host> -p <puerto> -V mqttv5 \
+  -u IOT-TEST-001 -P '<contraseña generada>' \
   -t "sgpmp/IOT-TEST-001/command"
 
 # Publicar un heartbeat de prueba
-mosquitto_pub -h <host> -p <puerto> \
-  -u sgpmp_devices -P '<contraseña>' \
+mosquitto_pub -h <host> -p <puerto> -V mqttv5 \
+  -u IOT-TEST-001 -P '<contraseña generada>' \
   -t "sgpmp/IOT-TEST-001/heartbeat" \
   -m '{"tipo_mensaje":"HEARTBEAT","nivel_bateria_pct":87.5}' -q 1
 ```
@@ -86,11 +113,15 @@ exista todavía, pídelo (ver sección 5).
 
 ## 4. Limitaciones conocidas (léelo antes de reportar como bug)
 
-- **Credencial MQTT compartida, no por dispositivo.** No hay forma de
-  revocar el acceso de un solo dispositivo sin afectar a todos — si se
-  necesita eso, hay que definirlo como un cambio nuevo (ver sección 5).
-- **`dev` no tiene TLS.** El tráfico MQTT va sin cifrar en ese ambiente.
-  Antes de producción esto se activa — no es el comportamiento final.
+- **La credencial compartida `sgpmp_devices` sigue abierta hasta que todas
+  los Edge migren.** Con ella todavía se puede leer el `command` de otro
+  serial (TC-M09-250/251); con una credencial propia no. Diseño y mediciones en
+  [`docs/RFC_credencial_mqtt_por_dispositivo.md`](./docs/RFC_credencial_mqtt_por_dispositivo.md).
+- **`dev` no tiene TLS; `test`/`prod` solo aceptan TLS.** En `dev` el
+  tráfico MQTT va sin cifrar (no tiene certificados montados). En `test`/
+  `prod` (TC-M09-253) el host publica únicamente los listeners TLS, en los
+  puertos de siempre: el cliente debe conectar con `mqtts`/`wss` y validar el
+  certificado; en texto plano no hay respuesta.
 - **Sin reenvío automático de comandos.** Si un dispositivo estaba offline
   cuando se le envió un comando, alguien tiene que reintentarlo manualmente
   desde la UI una vez que el dispositivo reconecta — no está construido el
