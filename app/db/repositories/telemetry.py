@@ -49,7 +49,8 @@ INSERT INTO modulo3.heartbeats (
     :nivel_bateria,
     :rssi,
     :snr,
-    :estado_buffer,
+    -- "char": asyncpg lo codifica como bytes; pasando por text acepta un str.
+    CAST(CAST(:estado_buffer AS text) AS "char"),
     :datos_pendientes,
     :version_firmware,
     CAST(:coordenadas AS jsonb),
