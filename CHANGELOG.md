@@ -1,3 +1,9 @@
+## [0.2.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.8...v0.2.0-rc.9) (2026-10-04)
+
+### Features
+
+* **rf23:** PENDIENTE al instante si el Gateway Edge no esta conectado al broker ([9213907](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/9213907fd896777642918aa695a56c24ee5920bb))
+
 ## [0.2.0-rc.8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.7...v0.2.0-rc.8) (2026-10-04)
 
 ### Bug Fixes
