@@ -1,3 +1,15 @@
+## [0.2.0-rc.7](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.6...v0.2.0-rc.7) (2026-10-04)
+
+### Features
+
+* **rf23:** credencial del Gateway Edge con los seriales que atiende segun modulo9 (TC-M09-250/251) ([04bb366](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/04bb36671af2d80e158235701af56f6fd125dcf2))
+* **rf23:** credencial MQTT por Raspberry con dynamic-security (TC-M09-250/251) ([94f0387](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/94f03875f58583cce8da24c23215b7d153612ff3))
+* **rf23:** id_comando y emitido_en en comandos y validacion del ACK (TC-M09-G127) ([e2a7294](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/e2a7294f049204a9e7a630eb8b3dd10e1e11d272))
+
+### Bug Fixes
+
+* **rf23:** exponer solo listeners TLS cuando el ambiente lo exige (TC-M09-G127) ([bd1910f](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/bd1910f7311ca0355e7a9c69953f7ae27d995fc7))
+
 ## [0.2.0-rc.6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.5...v0.2.0-rc.6) (2026-09-21)
 
 ### Bug Fixes
