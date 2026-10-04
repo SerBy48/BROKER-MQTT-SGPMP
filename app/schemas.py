@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -42,6 +42,11 @@ class TelemetryPayload(BaseModel):
     metadatos: dict[str, Any] = Field(default_factory=dict)
 
 
+# modulo3.heartbeats.estado_local_buffer es "char" (un byte): 'I'nactivo,
+# 'A'ctivo, 'L'leno. El edge_agent manda la palabra completa; se aceptan ambas.
+_ESTADOS_BUFFER = {"I": "I", "A": "A", "L": "L", "INACTIVO": "I", "ACTIVO": "A", "LLENO": "L"}
+
+
 class HeartbeatPayload(BaseModel):
     """Payload esperado en el topic `<prefix>/<serial>/heartbeat`."""
 
@@ -55,6 +60,16 @@ class HeartbeatPayload(BaseModel):
     coordenadas: dict[str, Any] | None = None
     fecha_registro: datetime | None = None
     reloj_sincronizado: bool = False
+
+    @field_validator("estado_local_buffer")
+    @classmethod
+    def _codigo_buffer(cls, valor: str | None) -> str | None:
+        if valor is None:
+            return None
+        codigo = _ESTADOS_BUFFER.get(valor.strip().upper())
+        if codigo is None:
+            raise ValueError("estado_local_buffer debe ser I/A/L o INACTIVO/ACTIVO/LLENO")
+        return codigo
 
 
 class CommandRequest(BaseModel):
