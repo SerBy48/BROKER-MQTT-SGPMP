@@ -172,9 +172,13 @@ async def main() -> None:
         "failed" not in pub(u, p, f"sgpmp/{a2}/status"),
     )
 
+    # comando con el Edge apagado: el broker lo sabe sin esperar el ACK
+    check("Edge apagado: sin_conexion -> True (PENDIENTE al instante)", await cm.sin_conexion(EDGE))
+
     # entrega real: el Edge recibe el comando de su dispositivo, no el de uno ajeno
     edge = escuchar(u, p, f"sgpmp/{a1}/command")
     await asyncio.sleep(0.7)
+    check("Edge conectado: sin_conexion -> False", await cm.sin_conexion(EDGE) is False)
     await mqtt_gateway.publish(f"sgpmp/{a1}/command", b'{"para":"atendido"}')
     await mqtt_gateway.publish(f"sgpmp/{DIRECTO}/command", b'{"para":"ajeno"}')
     await asyncio.sleep(1)
@@ -182,6 +186,16 @@ async def main() -> None:
     salida = edge.communicate()[0]
     check("RF-23: el comando de su dispositivo le llega al Edge", "atendido" in salida)
     check("no recibe el comando de un dispositivo ajeno", "ajeno" not in salida)
+
+    # un Edge que aún usa la credencial compartida podría ser el que atiende: no se corta
+    legacy = escuchar(lu, lp, f"sgpmp/{a1}/command")
+    await asyncio.sleep(0.7)
+    check(
+        "Edge apagado pero alguien en la credencial legacy: sin_conexion -> False",
+        await cm.sin_conexion(EDGE) is False,
+    )
+    legacy.terminate()
+    legacy.communicate()
 
     try:
         await cm.emitir(a1)
@@ -230,12 +244,12 @@ async def main() -> None:
     await asyncio.sleep(0.7)
     await cm.revocar(EDGE)
     await asyncio.sleep(1)
-    desconectado = edge.poll() is not None
-    if not desconectado:
-        edge.terminate()
-    check(
-        "Edge desactivado: queda desconectado", desconectado, (edge.communicate()[0] or "").strip()
-    )
+    # Se pregunta al broker: según la versión, mosquitto_sub sale o reintenta al
+    # ser expulsado, así que su proceso no sirve de prueba.
+    estado = await cm.consultar(EDGE)
+    edge.terminate()
+    edge.communicate()
+    check("Edge desactivado: queda desconectado", estado is not None and not estado.conectada)
     check(
         "Edge desactivado: no puede volver a conectar",
         "Not authorized" in pub(u, nueva.password, f"sgpmp/{a1}/status"),
