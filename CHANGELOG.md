@@ -1,3 +1,9 @@
+## [0.2.0-rc.8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.7...v0.2.0-rc.8) (2026-10-04)
+
+### Bug Fixes
+
+* **heartbeat:** guardar estado_local_buffer en la columna "char" de modulo3.heartbeats ([270f70a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/270f70ade9a8a9ab033804ad3c2fd85cdbeed50e))
+
 ## [0.2.0-rc.7](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.6...v0.2.0-rc.7) (2026-10-04)
 
 ### Features
