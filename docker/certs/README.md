@@ -18,10 +18,12 @@ y reiniciar el contenedor `mosquitto`. El entrypoint
 (`docker/mosquitto-entrypoint.sh`) detecta ambos archivos en el arranque y
 genera automáticamente los listeners cifrados:
 
-| Puerto (contenedor) | Protocolo | Puerto host (override) |
-|---|---|---|
-| 8883 | MQTT sobre TLS (mqtts) | `MQTT_TLS_HOST_PORT` (default `8883`) |
-| 9002 | WebSocket sobre TLS (wss) | `MQTT_WSS_HOST_PORT` (default `9002`) |
+| Puerto (contenedor) | Protocolo |
+|---|---|
+| 8883 | MQTT sobre TLS (mqtts) |
+| 9002 | WebSocket sobre TLS (wss) |
+
+Se publican al host según la sección "Modo solo TLS" de abajo.
 
 Si no hay certificados, el broker sigue sirviendo solo texto plano en
 1883/9001 (no falla el arranque) — no usar así en producción.
@@ -54,5 +56,7 @@ arranque** (código 1) en vez de dejar un puerto publicado sin listener. Verific
 con un certificado autofirmado: conexiones `tcp` y `websockets` en texto plano
 con credenciales válidas no reciben CONNACK; `mqtts` y `wss` conectan.
 
-Los puertos `MQTT_TLS_HOST_PORT`/`MQTT_WSS_HOST_PORT` de arriba siguen siendo la
-opción para un ambiente que necesite **ambos** modos durante una migración.
+Para un ambiente que necesite **ambos** modos durante una migración, hay que
+descomentar en `docker-compose.yml` los mapeos `MQTT_TLS_HOST_PORT` /
+`MQTT_WSS_HOST_PORT` y asignarles puertos de host libres (en el servidor
+compartido el 8883 lo ocupa otro proyecto).

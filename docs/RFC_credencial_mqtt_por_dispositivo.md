@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Estado** | Propuesta. Pendiente de aprobación de Análisis/IoT; **no implementada**. |
+| **Estado** | **Implementada (opción A)** con un ajuste al modelo: ver la sección 7. Aprobada por el líder del proyecto. |
 | **Origen** | TC-M09-G127, casos **TC-M09-250** y **TC-M09-251** (ataques al protocolo MQTT, RF-23) |
 | **Relacionado** | SEG-BROKER-01 (ACL de mínimo privilegio), TC-M09-252 y TC-M09-253 (resueltos aparte, ver abajo) |
 | **Alcance** | Broker (`BROKER-MQTT-SGPMP`), backend (`sgpmp-backend`), firmware |
@@ -149,3 +149,91 @@ compartida podría declarar el client id de otro dispositivo.
   de un *join-request* y la unicidad de las claves de sesión (AppSKey/NwkSKey)
   pertenecen a ese servidor de red y al firmware del sensor, no a este broker.
   Ver `anotaciones/modulo_9/tc_m09_g127_g128_seguridad_iot.md` en `sgpmp-backend`.
+
+## 7. Implementación (SEG-BROKER-03)
+
+### 7.1 Ajuste al modelo: Gateway Edge con relación N:1 en modulo9
+
+La sección 4 asumía "un usuario por dispositivo, `usuario = serial`" y un rol
+`dispositivo` con `%u`. Los RF describen otra cosa (M03): los **dispositivos IoT /
+nodos** capturan con sus sensores y transmiten por radio a un **Gateway IoT**, que
+pasa a IP y es lo único que habla con el broker. En `EDGE-FIRMWARE-SGPMP` ese
+gateway es la computadora de borde del sitio (hoy una Raspberry), que atiende
+varios dispositivos con **una sola conexión MQTT**. Se implementó (aprobado por
+el DBA):
+
+- **Gateway Edge en modulo9.** Es un dispositivo de tipo `GATEWAY_EDGE` y cada
+  dispositivo que atiende apunta a él con `dispositivos_iot.id_dispositivo_gateway`
+  (autorreferencia N:1, migración `4254acf5798b` en sgpmp-backend). Solo puede
+  apuntar a un Edge activo de la misma finca. Desactivar el Edge desactiva en
+  cascada a sus dispositivos.
+- **Una credencial por Edge** (usuario = su serial) o por dispositivo que se
+  conecta directo. Un dispositivo que depende de un Edge no tiene credencial
+  propia.
+- **Un rol `serial-<S>` por serial**, con topics literales:
+  `publishClientSend sgpmp/<S>/{telemetry,heartbeat,status}`,
+  `subscribeLiteral` y `publishClientReceive` sobre `sgpmp/<S>/command`, y
+  `allowwildcardsubs: false`. La credencial del Edge lleva su rol y el de cada
+  dispositivo activo que lo apunta, **leídos de la BD** (no de la petición).
+- **Sincronización sin rotar.** El backend avisa cada cambio de Edge con
+  `POST /v1/devices/{serial}/credential/sync` y el gateway alinea los roles del
+  Edge con modulo9 sin tocar la clave; al reconectar, el gateway además
+  reconcilia todo (por si un aviso se perdió).
+- Revocar un serial es `deleteRole serial-<S>` (se lo quita al Edge); revocar un
+  Edge es `disableClient` (lo desconecta en el acto).
+
+### 7.2 Verificado contra Mosquitto 2.1.2 (imagen fijada del broker)
+
+| Prueba | Resultado |
+|---|---|
+| `SUBSCRIBE #`, `sgpmp/#`, `sgpmp/+/command`, `sgpmp/<otro>/command` | "All subscription requests were denied" (cumple TC-M09-251) |
+| `SUBSCRIBE` del `command` propio y de un serial adicional | Concedido |
+| Publicar en `status` o `command` de otro serial (MQTT v5) | "Not authorized" (TC-M09-250) |
+| Comando del gateway a un dispositivo que el Edge no atiende | No le llega al Edge |
+| Rotar la credencial | La clave vieja queda rechazada |
+| `disableClient` con el Edge conectado | Desconectado al instante; no puede reconectar |
+| Credencial compartida legacy | Sigue publicando; su `SUBSCRIBE #` ahora también se deniega |
+
+Se reproduce con `scripts/e2e_credenciales_mqtt.py` (gateway real contra el
+broker del docker-compose, 25 verificaciones, incluida la sincronización sin
+rotar y la revocación en cascada; instrucciones en el script). Las
+pruebas unitarias están en `tests/test_credenciales_mqtt.py` y
+`tests/test_api_credenciales.py`.
+
+Comportamientos de dynsec que condicionan la implementación (medidos):
+
+- Con el broker apagado, `mosquitto_ctrl -f <archivo> dynsec` **solo** puede
+  cambiar la clave de un cliente que ya existe; crear roles o clientes no hace
+  nada. Por eso el entrypoint solo hace `dynsec init` (primer arranque) y rota
+  las claves del gateway y de la legacy; los roles y clientes los crea el
+  gateway por `$CONTROL` al conectar.
+- `modifyClient` y `setClientPassword` desconectan al cliente **aunque no cambie
+  nada**, y `modifyRole` desconecta a quien tenga ese rol. La sincronización del
+  gateway lee el estado y solo escribe lo que difiere; si no, expulsaría al
+  gateway y a los Edge en cada conexión. La única desconexión
+  esperada es la del gateway en el primer arranque, al asignarse su rol.
+- `addClientRole` sobre un rol que el cliente ya tiene devuelve "Internal
+  error": se usa `modifyClient` con la lista completa de roles.
+
+### 7.3 Piezas
+
+| Repo | Qué hace |
+|---|---|
+| BROKER-MQTT-SGPMP | `docker/mosquitto.conf` (plugin), `docker/mosquitto-entrypoint.sh` (init y rotación offline), `app/mqtt/dynsec.py` (cliente `$CONTROL`), `app/services/credenciales_mqtt.py` (modelo, sincronización y reconciliación con modulo9), `POST/GET/DELETE /v1/devices/{serial}/credential` y `POST .../credential/sync` |
+| sgpmp-backend | Migración de `id_dispositivo_gateway` y el tipo `GATEWAY_EDGE`; RF-21 con Edge (registro, `PATCH /{id}/gateway`, desactivación en cascada); RBAC, auditoría en la bitácora IoT y llamadas HTTPS al gateway |
+| sgpmp-frontend | Tipo Gateway Edge y selector del Edge al registrar; en la tabla, el Edge de cada dispositivo, "Cambiar Edge" y "Credencial MQTT" en las filas Edge; aviso de cascada al desactivar |
+| EDGE-FIRMWARE-SGPMP | El Edge publica su propio heartbeat; `id_comando` en el ACK; documentación (`EDGE_MQTT_USERNAME` = serial del Edge, `EDGE_SERIALS` = Edge + sus dispositivos) |
+
+### 7.4 Migración
+
+1. Desplegar broker y gateway: el entrypoint crea `dynamic-security.json` y el
+   gateway da de alta la credencial compartida con su ACL de siempre. Ninguna
+   Edge se corta.
+2. Registrar cada Edge (tipo Gateway Edge), apuntarle sus dispositivos, generar
+   su credencial desde la plataforma y copiarla a su
+   `/etc/sgpmp/edge-agent.env`.
+3. Cuando todas migraron, borrar `MQTT_DEVICE_USERNAME`/`MQTT_DEVICE_PASSWORD` en
+   Dokploy: el gateway elimina la credencial compartida al reconectar. Desde ahí
+   TC-M09-250/251 quedan cerrados.
+4. Respaldar el volumen `mosquitto_secrets` (Volume Backups de Dokploy): perderlo
+   obliga a regenerar e instalar la credencial de cada Edge.

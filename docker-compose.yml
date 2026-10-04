@@ -1,26 +1,20 @@
 services:
   mosquitto:
-    # Build en vez de "image:" directo: necesita el entrypoint que genera
-    # docker/passwd al arrancar (ver Dockerfile.mosquitto). El digest de
-    # eclipse-mosquitto:2 base sigue fijado ahí mismo.
+    # Build en vez de "image:" directo: necesita el entrypoint que prepara
+    # dynamic-security.json al arrancar (ver Dockerfile.mosquitto). El digest
+    # de eclipse-mosquitto:2 base sigue fijado ahí mismo.
     build:
       context: .
       dockerfile: Dockerfile.mosquitto
     environment:
+      # Admin de dynamic-security = el gateway. Las credenciales de los
+      # dispositivos y los topics de cada rol los crea el gateway por $CONTROL;
+      # este contenedor solo rota, con el broker apagado, la clave del gateway y
+      # la de la credencial compartida legacy (mientras exista).
       MQTT_USERNAME: ${MQTT_USERNAME}
       MQTT_PASSWORD: ${MQTT_PASSWORD}
-      # Credencial de los dispositivos IoT (usuario aparte del gateway) —
-      # sin esto el entrypoint nunca las recibe, aunque estén en Dokploy.
-      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME}
-      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD}
-      # Mismos nombres/prefijo de topic que usa el gateway (app/config.py)
-      # para generar el acl_file (SEG-BROKER-01) — si estos difieren entre
-      # los dos contenedores, el broker termina bloqueando topics legítimos.
-      MQTT_TOPIC_PREFIX: ${MQTT_TOPIC_PREFIX:-sgpmp}
-      MQTT_TOPIC_TELEMETRY: ${MQTT_TOPIC_TELEMETRY:-telemetry}
-      MQTT_TOPIC_HEARTBEAT: ${MQTT_TOPIC_HEARTBEAT:-heartbeat}
-      MQTT_TOPIC_STATUS: ${MQTT_TOPIC_STATUS:-status}
-      MQTT_TOPIC_COMMAND: ${MQTT_TOPIC_COMMAND:-command}
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME:-}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD:-}
       # TC-M09-253: qué puerto del contenedor se publica al host (ver "ports").
       # El entrypoint los usa para abortar el arranque si se pide TLS sin certs.
       MQTT_PUERTO_PUBLICO: ${MQTT_PUERTO_PUBLICO:-1883}
@@ -64,12 +58,12 @@ services:
       # Encrypt/certbot) — gitignoreados, los provee Ops por ambiente. Ver
       # docker/certs/README.md.
       - ./docker/certs:/mosquitto/certs:ro
-      # Volumen nombrado en un directorio aparte (no /mosquitto/config,
-      # que ya tiene el bind mount de arriba): ./docker/passwd está
-      # gitignoreado y no existe en un clone nuevo, así que el entrypoint
-      # lo genera dentro de este volumen en el primer arranque y persiste
-      # entre reinicios/redeploys. mosquitto.conf apunta su password_file
-      # acá (ver docker/mosquitto.conf).
+      # Volumen nombrado con dynamic-security.json (SEG-BROKER-03): usuarios,
+      # roles y hashes de contraseña de todas las credenciales MQTT. Persiste
+      # entre reinicios/redeploys. Perderlo obliga a regenerar e instalar la
+      # credencial de cada Gateway Edge: respaldarlo (Volume Backups de Dokploy).
+      # Ojo: recrear el compose en Dokploy cambia el appName y con él el nombre
+      # del volumen, que arranca vacío.
       - mosquitto_secrets:/mosquitto/secrets
     restart: unless-stopped
 

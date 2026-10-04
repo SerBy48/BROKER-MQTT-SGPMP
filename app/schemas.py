@@ -78,3 +78,22 @@ class CommandResponse(BaseModel):
     topic: str | None = None
     estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
     mensaje: str
+
+
+# Mismo allow-list que SerialDispositivo en sgpmp-backend. Además es una barrera
+# de seguridad acá: el serial termina dentro de nombres de rol y de topics de la
+# ACL de dynamic-security, donde un '#', '+' o '/' abriría permisos ajenos.
+PATRON_SERIAL = r"^[A-Za-z0-9_-]{1,50}$"
+
+
+class CredencialResponse(BaseModel):
+    usuario: str
+    password: str
+    seriales: list[str]
+
+
+class EstadoCredencialResponse(BaseModel):
+    usuario: str
+    habilitada: bool
+    conectada: bool
+    seriales: list[str]
