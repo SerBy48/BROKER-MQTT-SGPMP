@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import UTC, datetime
 
+from app.config import get_settings
 from app.core.errors import (
     DeviceNotFoundError,
     SensorNotFoundError,
@@ -100,7 +101,9 @@ async def ingest_status(serial: str, data: dict) -> None:
 
     Contrato propuesto para el ACK de configuración (RF-23, confirmar con
     equipo IoT cuando los topics estén cerrados):
-    ``{"tipo_mensaje": "ACK_CONFIGURACION", "resultado": "OK"}``.
+    ``{"tipo_mensaje": "ACK_CONFIGURACION", "resultado": "OK", "id_comando": "<id del comando>"}``.
+    El `id_comando` es el que llegó en el comando; solo un ACK que lo devuelva
+    resuelve la espera (TC-M09-252, anti-replay).
 
     Si hay una espera de comando pendiente para este `serial`
     (dispatch_command la crea al publicar), se resuelve acá -- eso es lo que
@@ -111,9 +114,14 @@ async def ingest_status(serial: str, data: dict) -> None:
     """
     logger.info("Status recibido de %s: %s", serial, data)
     if data.get("tipo_mensaje") == "ACK_CONFIGURACION" and data.get("resultado") == "OK":
-        resuelto = correlacion.resolver_ack(serial)
+        resuelto = correlacion.resolver_ack(
+            serial,
+            data.get("id_comando"),
+            exigir_id=get_settings().mqtt_ack_requiere_id_comando,
+        )
         if not resuelto:
             logger.info(
-                "ACK de %s sin request en espera (ya expiró o no había ninguna).",
+                "ACK de %s no resolvió ninguna espera (expiró, no había ninguna o no "
+                "correspondía al comando en vuelo).",
                 serial,
             )

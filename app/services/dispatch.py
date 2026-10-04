@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
+from datetime import UTC, datetime
 
 from app.config import get_settings
 from app.core.errors import DeviceNotFoundError, MqttNotConnectedError
@@ -46,11 +48,17 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
         )
 
     settings = get_settings()
+    # TC-M09-252 (anti-replay): `id_comando` correlaciona el ACK con ESTE comando y
+    # `emitido_en` deja que el dispositivo descarte un comando capturado y reenviado
+    # más tarde (ver GUIA_CONEXION_IOT.md).
+    id_comando = uuid.uuid4().hex
     payload = {
+        "id_comando": id_comando,
+        "emitido_en": datetime.now(UTC).isoformat(),
         "frecuencia_captura": request.frecuencia_captura,
         "intervalo_transmision": request.intervalo_transmision,
     }
-    future = correlacion.crear_espera(request.serial)
+    future = correlacion.crear_espera(request.serial, id_comando)
     try:
         topic = await publisher.publish_command(request.serial, payload)
     except MqttNotConnectedError:
