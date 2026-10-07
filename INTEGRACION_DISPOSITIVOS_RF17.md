@@ -123,10 +123,13 @@ El aviso es este mensaje en `sgpmp/<serial Edge>/status`:
 
 El siguiente heartbeat del Edge lo vuelve a dar por conectado.
 
-Al reconectar, la sesión persistente entrega los comandos que quedaron
-encolados mientras estaba fuera; el Edge los aplica (respetando `version`),
-aunque su ACK llegue tarde para la plataforma. El estado en la plataforma se
-actualiza la próxima vez que alguien edite el umbral.
+Mientras el Edge está marcado como desconectado el broker no publica, así que
+**no hay reenvío automático** al reconectar (igual que RF-23): el umbral se
+vuelve a propagar la próxima vez que alguien lo edite. Solo un comando
+publicado antes de que el broker notara la caída (corte de red sin aviso,
+mientras no vence el keepalive) queda encolado en la sesión persistente; el
+Edge lo aplica al reconectar (respetando `version`), aunque su ACK llegue tarde
+para la plataforma.
 
 ## Probar sin hardware
 
