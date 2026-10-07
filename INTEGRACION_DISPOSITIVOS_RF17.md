@@ -103,10 +103,30 @@ confirmado", que es lo correcto.
 
 Si el Edge no está conectado al broker cuando se crea o edita el umbral, el
 broker no publica y responde `PENDIENTE` al instante (mismo mecanismo que
-RF-23). El Edge **sigue usando el último umbral que tenía guardado**: por eso
-el paso 3.1 pide persistencia. **No hay reenvío automático** al reconectar
-(igual que RF-23): el umbral se vuelve a propagar la próxima vez que alguien lo
-edite.
+RF-23); el backend guarda el umbral "Pendiente de Sincronización" y responde el
+500 del flujo alterno de RF-17. El Edge **sigue usando el último umbral que
+tenía guardado**: por eso el paso 3.1 pide persistencia.
+
+**El Edge tiene que avisar que se desconecta.** Con sesión persistente,
+Mosquitto sigue listando la conexión de un cliente después de que se cae, así
+que el broker no puede deducirlo solo y terminaría esperando los 30 s del ACK.
+El aviso es este mensaje en `sgpmp/<serial Edge>/status`:
+
+```json
+{"tipo_mensaje": "DESCONEXION"}
+```
+
+- Como **Last Will** al conectar (QoS 1, sin retain): Mosquitto lo publica si
+  la conexión se corta (corte de luz, red), al vencer el keepalive.
+- Publicado por el propio Edge **antes de un cierre ordenado** (`systemctl
+  stop`): en un `DISCONNECT` normal MQTT no envía el Last Will.
+
+El siguiente heartbeat del Edge lo vuelve a dar por conectado.
+
+Al reconectar, la sesión persistente entrega los comandos que quedaron
+encolados mientras estaba fuera; el Edge los aplica (respetando `version`),
+aunque su ACK llegue tarde para la plataforma. El estado en la plataforma se
+actualiza la próxima vez que alguien edite el umbral.
 
 ## Probar sin hardware
 

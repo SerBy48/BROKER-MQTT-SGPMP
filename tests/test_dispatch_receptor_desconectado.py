@@ -15,8 +15,9 @@ import pytest
 
 from app.config import get_settings
 from app.db.repositories.registry import EstadoDispositivo
+from app.mqtt import presencia
 from app.schemas import CommandRequest
-from app.services import credenciales_mqtt, dispatch
+from app.services import credenciales_mqtt, dispatch, ingest
 
 
 @pytest.fixture(autouse=True)
@@ -138,3 +139,35 @@ async def test_conectado_o_sin_datos_se_publica_como_siempre(monkeypatch, sin_co
 
     assert publicados == ["ESP-1"]
     assert respuesta.estado == "NO_CONF"  # nadie manda el ACK en el test
+
+
+# ── TC-M09-63: aviso de desconexión del Edge (Last Will o cierre ordenado) ────
+
+
+async def test_edge_que_aviso_desconexion_cuenta_como_apagado_aunque_dynsec_lo_liste(
+    monkeypatch,
+) -> None:
+    # dynsec sigue listando la sesión persistente del Edge después de caerse.
+    pedidos = _dynsec(monkeypatch, _cliente(1))
+    await ingest.ingest_status("EDGE-1", {"tipo_mensaje": "DESCONEXION"})
+    try:
+        assert await credenciales_mqtt.sin_conexion("EDGE-1") is True
+        assert pedidos == []  # ni siquiera hace falta preguntarle a dynsec
+    finally:
+        presencia.marcar_conectado("EDGE-1")
+
+
+async def test_el_heartbeat_del_edge_lo_vuelve_a_dar_por_conectado(monkeypatch) -> None:
+    _dynsec(monkeypatch, _cliente(1))
+    await ingest.ingest_status("EDGE-1", {"tipo_mensaje": "DESCONEXION"})
+
+    @asynccontextmanager
+    async def sin_bd():
+        raise RuntimeError("BD caída")
+        yield
+
+    monkeypatch.setattr(ingest, "async_session_factory", sin_bd)
+    with pytest.raises(RuntimeError):
+        await ingest.ingest_heartbeat("EDGE-1", {"tipo_mensaje": "HEARTBEAT"})
+
+    assert await credenciales_mqtt.sin_conexion("EDGE-1") is False

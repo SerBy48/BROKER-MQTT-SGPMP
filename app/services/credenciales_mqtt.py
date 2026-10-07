@@ -41,7 +41,7 @@ from app.core.errors import (
 from app.db.engine import async_session_factory
 from app.db.repositories import registry
 from app.db.repositories.registry import EstadoDispositivo
-from app.mqtt import dynsec
+from app.mqtt import dynsec, presencia
 from app.schemas import PATRON_SERIAL
 
 logger = logging.getLogger(__name__)
@@ -361,7 +361,12 @@ async def sin_conexion(usuario: str) -> bool:
     `usuario` es el Gateway Edge del dispositivo, o el dispositivo si se conecta
     directo. Si no tiene credencial propia, o alguien está conectado con la
     compartida legacy (un Edge que aún no migró), no se sabe quién los recibe: False.
+
+    Un Edge que avisó su desconexión (`presencia`, TC-M09-63) cuenta como
+    desconectado aunque dynsec siga listando su sesión persistente.
     """
+    if presencia.desconectado(usuario):
+        return True
     settings = get_settings()
     comandos = [{"command": "getClient", "username": usuario}]
     if settings.mqtt_device_username and settings.mqtt_device_password:
