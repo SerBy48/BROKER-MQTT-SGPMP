@@ -1,3 +1,13 @@
+## [0.2.0-rc.10](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.9...v0.2.0-rc.10) (2026-10-07)
+
+### Features
+
+* **rf17:** propagar umbrales ambientales al Gateway Edge por /v1/commands (INC-M09-104-G29) ([217f9ee](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/217f9eea6efd13675d3e07c86c445b3151fdb142))
+
+### Bug Fixes
+
+* **rf17:** detectar al instante un Gateway Edge desconectado con el aviso DESCONEXION (TC-M09-63) ([caf0c60](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/caf0c6015b02a90e20c0e9c436f7e23a1d6e1a53))
+
 ## [0.2.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.8...v0.2.0-rc.9) (2026-10-04)
 
 ### Features

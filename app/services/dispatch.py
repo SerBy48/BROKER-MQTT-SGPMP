@@ -18,7 +18,7 @@ from app.core.errors import DeviceNotFoundError, MqttNotConnectedError
 from app.db.engine import async_session_factory
 from app.db.repositories import registry
 from app.mqtt import correlacion, publisher
-from app.schemas import CommandRequest, CommandResponse
+from app.schemas import CommandRequest, CommandResponse, UmbralCommandRequest
 from app.services import credenciales_mqtt
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,39 @@ async def _sin_conexion(receptor: str) -> bool:
         return False
 
 
-async def dispatch_command(request: CommandRequest) -> CommandResponse:
+def _cuerpo_comando(request: CommandRequest | UmbralCommandRequest) -> tuple[dict, str]:
+    """Campos propios del comando según su `origen`, y el tipo de ACK que lo confirma.
+
+    El comando de configuración (RF-23) se publica igual que antes, sin
+    `tipo_comando`, para no romper firmware que ya lo procesa. El de umbral
+    (RF-17) lleva `tipo_comando: "UMBRAL_AMBIENTAL"` para que el Edge lo
+    distinga en el mismo topic `command` (no se agregan topics: la ACL de la
+    credencial del Edge ya cubre `command`/`status` de su serial).
+    """
+    if isinstance(request, UmbralCommandRequest):
+        return (
+            {
+                "tipo_comando": "UMBRAL_AMBIENTAL",
+                "id_umbral_ambiental": request.id_umbral_ambiental,
+                "version": request.version.isoformat() if request.version else None,
+                "variable": request.variable,
+                "unidad": request.unidad,
+                "valor_min": request.valor_min,
+                "valor_max": request.valor_max,
+                "niveles": [nivel.model_dump() for nivel in request.niveles],
+            },
+            correlacion.ACK_UMBRAL,
+        )
+    return (
+        {
+            "frecuencia_captura": request.frecuencia_captura,
+            "intervalo_transmision": request.intervalo_transmision,
+        },
+        correlacion.ACK_CONFIGURACION,
+    )
+
+
+async def dispatch_command(request: CommandRequest | UmbralCommandRequest) -> CommandResponse:
     logger.debug("Despachando comando: serial=%s", request.serial)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, request.serial)
@@ -83,17 +115,17 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
     # `emitido_en` deja que el dispositivo descarte un comando capturado y reenviado
     # más tarde (ver GUIA_CONEXION_IOT.md).
     id_comando = uuid.uuid4().hex
+    cuerpo, tipo_ack = _cuerpo_comando(request)
     payload = {
         "id_comando": id_comando,
         "emitido_en": datetime.now(UTC).isoformat(),
-        "frecuencia_captura": request.frecuencia_captura,
-        "intervalo_transmision": request.intervalo_transmision,
+        **cuerpo,
     }
-    future = correlacion.crear_espera(request.serial, id_comando)
+    future = correlacion.crear_espera(request.serial, id_comando, tipo_ack)
     try:
         topic = await publisher.publish_command(request.serial, payload)
     except MqttNotConnectedError:
-        correlacion.limpiar_espera(request.serial)
+        correlacion.limpiar_espera(request.serial, id_comando)
         logger.error("Broker MQTT no conectado; degradando %s a PENDIENTE.", request.serial)
         return CommandResponse(
             serial=request.serial,
@@ -119,4 +151,4 @@ async def dispatch_command(request: CommandRequest) -> CommandResponse:
             mensaje="El comando fue enviado pero el dispositivo no confirmó la recepción a tiempo.",
         )
     finally:
-        correlacion.limpiar_espera(request.serial)
+        correlacion.limpiar_espera(request.serial, id_comando)

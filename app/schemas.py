@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -75,17 +75,46 @@ class HeartbeatPayload(BaseModel):
 class CommandRequest(BaseModel):
     """Comando enviado por el servidor web para reconfigurar un dispositivo.
 
-    `origen` identifica qué caso de uso del backend originó el comando.
-    Hoy solo existe "configuracion" (RF-23); se deja como Literal para poder
-    agregar "telemetria"/"prediccion" el día que esos flujos envíen comandos
-    reales por este mismo punto de entrada — no se construye nada de eso
-    todavía.
+    `origen` identifica qué caso de uso del backend originó el comando:
+    "configuracion" (RF-23, esta clase) o "umbral" (RF-17,
+    `UmbralCommandRequest`). `ComandoRequest` es la unión que recibe
+    `POST /v1/commands`.
     """
 
     origen: Literal["configuracion"]
     serial: str
     frecuencia_captura: int = Field(gt=0)
     intervalo_transmision: int = Field(gt=0)
+
+
+class NivelUmbral(BaseModel):
+    nivel: Literal["normal", "precaucion", "critico"]
+    limite_inferior: float
+    limite_superior: float
+
+
+class UmbralCommandRequest(BaseModel):
+    """Umbral ambiental de una especie hacia un Gateway Edge (RF-17, INC-M09-104-G29).
+
+    El backend resuelve a qué Gateway Edge le corresponde el umbral (los de las
+    áreas de esa especie) y llama una vez por `serial` de Gateway. `version` es
+    la `fecha_actualizacion` del umbral: deja que el Edge descarte una versión
+    más vieja que llegue tarde. `variable` es el mismo nombre que el Edge usa en
+    el campo `variable` de la telemetría.
+    """
+
+    origen: Literal["umbral"]
+    serial: str
+    id_umbral_ambiental: int = Field(gt=0)
+    version: datetime | None = None
+    variable: str = Field(min_length=1)
+    unidad: str
+    valor_min: float
+    valor_max: float
+    niveles: list[NivelUmbral] = Field(min_length=1)
+
+
+ComandoRequest = Annotated[CommandRequest | UmbralCommandRequest, Field(discriminator="origen")]
 
 
 class CommandResponse(BaseModel):

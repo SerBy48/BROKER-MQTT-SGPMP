@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 
 from app.api.dependencies import require_api_token
 from app.core.errors import DeviceNotFoundError
-from app.schemas import CommandRequest, CommandResponse
+from app.schemas import ComandoRequest, CommandResponse
 from app.services.dispatch import dispatch_command
 
 router = APIRouter()
@@ -17,7 +17,7 @@ router = APIRouter()
     response_model=CommandResponse,
     dependencies=[Depends(require_api_token)],
 )
-async def create_command(request: CommandRequest) -> CommandResponse:
+async def create_command(request: ComandoRequest) -> CommandResponse:
     try:
         return await dispatch_command(request)
     except DeviceNotFoundError as exc:

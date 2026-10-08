@@ -225,16 +225,17 @@ inverso, fuera de alcance de RF-23 en su primera entrega).
 | Método | Ruta | Descripción | Auth |
 |---|---|---|---|
 | `GET` | `/v1/healthz` | Salud del servicio | — |
-| `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) | Bearer |
+| `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) o un umbral a un Gateway Edge (RF-17) | Bearer |
 | `GET` | `/v1/devices` | Estado de dispositivos IoT | Bearer |
 
 `POST /v1/commands` es síncrono: si el dispositivo está `ACTIVO`
 (`modulo3.estados_dispositivos_iot`), publica el comando y espera hasta
-`MQTT_ACK_TIMEOUT_SECONDS` un ACK correlacionado por `serial` antes de
-responder. `origen` identifica el caso de uso que originó el comando —hoy
-solo `"configuracion"` existe de verdad, el campo queda reservado para que
-telemetría/predicción lo usen el día que también necesiten enviar comandos
-por este mismo punto de entrada.
+`MQTT_ACK_TIMEOUT_SECONDS` el ACK que devuelva su `id_comando` antes de
+responder. `origen` identifica el caso de uso que originó el comando:
+`"configuracion"` (RF-23) o `"umbral"` (RF-17, contrato completo en
+[`INTEGRACION_DISPOSITIVOS_RF17.md`](./INTEGRACION_DISPOSITIVOS_RF17.md)).
+Varios comandos en vuelo al mismo serial se confirman cada uno por su
+`id_comando`.
 
 ```bash
 curl -X POST http://localhost:8000/v1/commands \

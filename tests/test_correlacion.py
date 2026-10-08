@@ -87,6 +87,53 @@ async def test_las_esperas_de_seriales_distintos_no_se_mezclan() -> None:
 async def test_limpiar_espera_quita_la_espera() -> None:
     correlacion.crear_espera("S1", "id-1")
 
-    correlacion.limpiar_espera("S1")
+    correlacion.limpiar_espera("S1", "id-1")
 
     assert correlacion.resolver_ack("S1", "id-1") is False
+    assert "S1" not in correlacion._pending_acks
+
+
+# RF-17 (INC-M09-104-G29): un mismo Gateway Edge recibe varios comandos en vuelo.
+
+
+async def test_dos_comandos_al_mismo_serial_no_se_pisan() -> None:
+    """Antes la segunda espera reemplazaba a la primera, que terminaba en NO_CONF."""
+    f1 = correlacion.crear_espera("EDGE-1", "id-1", correlacion.ACK_UMBRAL)
+    f2 = correlacion.crear_espera("EDGE-1", "id-2", correlacion.ACK_UMBRAL)
+
+    assert correlacion.resolver_ack("EDGE-1", "id-1", tipo_ack=correlacion.ACK_UMBRAL) is True
+    assert f1.done() and not f2.done()
+
+    assert correlacion.resolver_ack("EDGE-1", "id-2", tipo_ack=correlacion.ACK_UMBRAL) is True
+    assert f2.done()
+
+
+async def test_limpiar_una_espera_no_borra_las_demas_del_serial() -> None:
+    correlacion.crear_espera("EDGE-1", "id-1", correlacion.ACK_UMBRAL)
+    f2 = correlacion.crear_espera("EDGE-1", "id-2", correlacion.ACK_UMBRAL)
+
+    correlacion.limpiar_espera("EDGE-1", "id-1")
+
+    assert correlacion.resolver_ack("EDGE-1", "id-2", tipo_ack=correlacion.ACK_UMBRAL) is True
+    assert f2.done()
+
+
+async def test_un_ack_de_un_tipo_no_resuelve_un_comando_del_otro() -> None:
+    f_umbral = correlacion.crear_espera("EDGE-1", "id-u", correlacion.ACK_UMBRAL)
+    f_conf = correlacion.crear_espera("EDGE-1", "id-c", correlacion.ACK_CONFIGURACION)
+
+    # mismo id, tipo equivocado
+    assert (
+        correlacion.resolver_ack("EDGE-1", "id-u", tipo_ack=correlacion.ACK_CONFIGURACION) is False
+    )
+    # sin id: hay uno solo de cada tipo, cada ACK resuelve el suyo
+    assert correlacion.resolver_ack("EDGE-1", None, tipo_ack=correlacion.ACK_UMBRAL) is True
+    assert f_umbral.done() and not f_conf.done()
+
+
+async def test_ack_sin_id_con_varios_comandos_del_mismo_tipo_no_adivina() -> None:
+    f1 = correlacion.crear_espera("EDGE-1", "id-1", correlacion.ACK_UMBRAL)
+    f2 = correlacion.crear_espera("EDGE-1", "id-2", correlacion.ACK_UMBRAL)
+
+    assert correlacion.resolver_ack("EDGE-1", None, tipo_ack=correlacion.ACK_UMBRAL) is False
+    assert not f1.done() and not f2.done()
