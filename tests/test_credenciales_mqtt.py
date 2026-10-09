@@ -24,7 +24,7 @@ from app.core.errors import (
     UsuarioReservadoError,
 )
 from app.db.repositories.registry import EstadoDispositivo as E
-from app.mqtt import dynsec
+from app.mqtt import dynsec, presencia
 from app.services import credenciales_mqtt as cm
 
 
@@ -234,6 +234,19 @@ async def test_consultar(falso) -> None:
     assert estado == cm.EstadoCredencial(
         usuario="EDGE-1", habilitada=False, conectada=False, seriales=["EDGE-1", "ESP-1"]
     )
+
+
+async def test_consultar_no_da_por_conectado_al_edge_que_aviso_desconexion(falso) -> None:
+    """INC-M09-70-G29: dynsec sigue listando la sesión persistente del Edge caído;
+    `conectada` debe coincidir con lo que decide `sin_conexion()` al publicar."""
+    falso.datos = {"getClient": {"client": _edge("EDGE-1", connections=[{"address": "10.0.0.2"}])}}
+    assert (await cm.consultar("EDGE-1")).conectada is True
+
+    presencia.marcar_desconectado("EDGE-1")
+    try:
+        assert (await cm.consultar("EDGE-1")).conectada is False
+    finally:
+        presencia.marcar_conectado("EDGE-1")
 
 
 # ── Sincronización al conectar (reconciliación con modulo9) ─────────────────
