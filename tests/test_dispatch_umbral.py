@@ -219,3 +219,34 @@ def test_post_commands_acepta_el_origen_umbral(monkeypatch) -> None:
     assert respuesta.status_code == 200, respuesta.text
     assert respuesta.json()["estado"] == "APLICADA"
     assert isinstance(recibidos[0], UmbralCommandRequest)
+
+
+async def test_el_comando_de_camara_publica_solo_fps(monkeypatch) -> None:
+    publicados: list[dict] = []
+
+    async def publicar(serial, payload, qos=1):
+        publicados.append(payload)
+        await ingest.ingest_status(serial, _ack(payload["id_comando"], "ACK_CONFIGURACION"))
+        return "t"
+
+    monkeypatch.setattr(dispatch.publisher, "publish_command", publicar)
+
+    peticion = CommandRequest(origen="configuracion", serial="CAM-1", fps=15)
+    assert (await dispatch.dispatch_command(peticion)).estado == "APLICADA"
+    assert set(publicados[0]) == {"id_comando", "emitido_en", "fps"}
+    assert publicados[0]["fps"] == 15
+
+
+@pytest.mark.parametrize(
+    "campos",
+    [
+        {},
+        {"fps": 15, "frecuencia_captura": 60, "intervalo_transmision": 300},
+        {"frecuencia_captura": 60},
+        {"fps": 0},
+        {"fps": 61},
+    ],
+)
+def test_configuracion_exige_un_solo_juego_de_parametros(campos) -> None:
+    with pytest.raises(ValidationError):
+        CommandRequest(origen="configuracion", serial="S1", **campos)
