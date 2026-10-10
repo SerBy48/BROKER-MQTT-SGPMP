@@ -48,6 +48,18 @@ estado "pendiente" indefinidamente).
   - `frecuencia_captura`: cada cuántos minutos captura datos de los sensores.
   - `intervalo_transmision`: cada cuántos minutos transmite lo capturado al servidor.
 
+  **Cámaras (RF-23 v1.1):** a un dispositivo de categoría `CAMARA` no le llegan
+  `frecuencia_captura` ni `intervalo_transmision` (captura continua). Le llega
+  solo `fps`, cuadros por segundo de captura (1–60):
+  ```json
+  {
+    "id_comando": "9f1c2b7e4a3d4e0f8b6a5c1d2e3f4a5b",
+    "emitido_en": "2026-09-26T18:00:00.123456+00:00",
+    "fps": 15
+  }
+  ```
+  El ACK es el mismo `ACK_CONFIGURACION` del paso 3.
+
   `id_comando` y `emitido_en` (nuevos, TC-M09-252) protegen contra el **replay**:
   un comando capturado en la red y reenviado más tarde. El dispositivo debe:
   1. **Devolver `id_comando` en el ACK** (paso 3): sin eso el servidor no puede

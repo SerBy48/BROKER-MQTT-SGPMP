@@ -1,3 +1,13 @@
+## [0.2.0-rc.11](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.10...v0.2.0-rc.11) (2026-10-10)
+
+### Features
+
+* **rf23:** aceptar fps en el comando de configuracion de camaras (RF-23 v1.1) ([5836c73](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/5836c73e1a935b69ea0fc75075f426b7039c7eba))
+
+### Bug Fixes
+
+* **rf17:** conectada respeta el aviso de desconexion del edge (Arekkazu/sgpmp-backend[#532](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/532)) ([662d18b](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/662d18b93235931c65702330ed1679c585f8972a))
+
 ## [0.2.0-rc.10](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0-rc.9...v0.2.0-rc.10) (2026-10-07)
 
 ### Features
