@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -83,8 +83,22 @@ class CommandRequest(BaseModel):
 
     origen: Literal["configuracion"]
     serial: str
-    frecuencia_captura: int = Field(gt=0)
-    intervalo_transmision: int = Field(gt=0)
+    # RF-23 v1.1: un SENSOR lleva frecuencia_captura + intervalo_transmision;
+    # una CAMARA lleva solo fps (1-60, RF-21). Nunca ambos juegos.
+    frecuencia_captura: int | None = Field(default=None, gt=0)
+    intervalo_transmision: int | None = Field(default=None, gt=0)
+    fps: int | None = Field(default=None, ge=1, le=60)
+
+    @model_validator(mode="after")
+    def _un_solo_juego_de_parametros(self) -> CommandRequest:
+        sensor = self.frecuencia_captura is not None and self.intervalo_transmision is not None
+        sensor_parcial = (self.frecuencia_captura is None) != (self.intervalo_transmision is None)
+        camara = self.fps is not None
+        if sensor_parcial or sensor == camara:
+            raise ValueError(
+                "envíe frecuencia_captura e intervalo_transmision (sensor) o solo fps (cámara)"
+            )
+        return self
 
 
 class NivelUmbral(BaseModel):

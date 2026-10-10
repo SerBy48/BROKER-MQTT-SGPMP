@@ -60,6 +60,9 @@ def _cuerpo_comando(request: CommandRequest | UmbralCommandRequest) -> tuple[dic
             },
             correlacion.ACK_UMBRAL,
         )
+    if request.fps is not None:
+        # Cámara (RF-23 v1.1): mismo comando y mismo ACK, solo cambia el parámetro.
+        return {"fps": request.fps}, correlacion.ACK_CONFIGURACION
     return (
         {
             "frecuencia_captura": request.frecuencia_captura,
