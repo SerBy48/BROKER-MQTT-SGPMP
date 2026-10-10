@@ -385,7 +385,9 @@ async def consultar(serial: str) -> EstadoCredencial | None:
     return EstadoCredencial(
         usuario=serial,
         habilitada=not cliente.get("disabled", False),
-        conectada=bool(cliente.get("connections")),
+        # INC-M09-70-G29: la misma señal que `sin_conexion()` usa para no publicar.
+        # Sin esto, un Edge apagado seguía "conectada" por su sesión persistente.
+        conectada=bool(cliente.get("connections")) and not presencia.desconectado(serial),
         seriales=[
             r["rolename"].removeprefix(_PREFIJO_ROL_SERIAL)
             for r in cliente.get("roles", [])
