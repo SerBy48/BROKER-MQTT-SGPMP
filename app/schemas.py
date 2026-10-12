@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -42,6 +42,11 @@ class TelemetryPayload(BaseModel):
     metadatos: dict[str, Any] = Field(default_factory=dict)
 
 
+# modulo3.heartbeats.estado_local_buffer es "char" (un byte): 'I'nactivo,
+# 'A'ctivo, 'L'leno. El edge_agent manda la palabra completa; se aceptan ambas.
+_ESTADOS_BUFFER = {"I": "I", "A": "A", "L": "L", "INACTIVO": "I", "ACTIVO": "A", "LLENO": "L"}
+
+
 class HeartbeatPayload(BaseModel):
     """Payload esperado en el topic `<prefix>/<serial>/heartbeat`."""
 
@@ -56,21 +61,74 @@ class HeartbeatPayload(BaseModel):
     fecha_registro: datetime | None = None
     reloj_sincronizado: bool = False
 
+    @field_validator("estado_local_buffer")
+    @classmethod
+    def _codigo_buffer(cls, valor: str | None) -> str | None:
+        if valor is None:
+            return None
+        codigo = _ESTADOS_BUFFER.get(valor.strip().upper())
+        if codigo is None:
+            raise ValueError("estado_local_buffer debe ser I/A/L o INACTIVO/ACTIVO/LLENO")
+        return codigo
+
 
 class CommandRequest(BaseModel):
     """Comando enviado por el servidor web para reconfigurar un dispositivo.
 
-    `origen` identifica qué caso de uso del backend originó el comando.
-    Hoy solo existe "configuracion" (RF-23); se deja como Literal para poder
-    agregar "telemetria"/"prediccion" el día que esos flujos envíen comandos
-    reales por este mismo punto de entrada — no se construye nada de eso
-    todavía.
+    `origen` identifica qué caso de uso del backend originó el comando:
+    "configuracion" (RF-23, esta clase) o "umbral" (RF-17,
+    `UmbralCommandRequest`). `ComandoRequest` es la unión que recibe
+    `POST /v1/commands`.
     """
 
     origen: Literal["configuracion"]
     serial: str
-    frecuencia_captura: int = Field(gt=0)
-    intervalo_transmision: int = Field(gt=0)
+    # RF-23 v1.1: un SENSOR lleva frecuencia_captura + intervalo_transmision;
+    # una CAMARA lleva solo fps (1-60, RF-21). Nunca ambos juegos.
+    frecuencia_captura: int | None = Field(default=None, gt=0)
+    intervalo_transmision: int | None = Field(default=None, gt=0)
+    fps: int | None = Field(default=None, ge=1, le=60)
+
+    @model_validator(mode="after")
+    def _un_solo_juego_de_parametros(self) -> CommandRequest:
+        sensor = self.frecuencia_captura is not None and self.intervalo_transmision is not None
+        sensor_parcial = (self.frecuencia_captura is None) != (self.intervalo_transmision is None)
+        camara = self.fps is not None
+        if sensor_parcial or sensor == camara:
+            raise ValueError(
+                "envíe frecuencia_captura e intervalo_transmision (sensor) o solo fps (cámara)"
+            )
+        return self
+
+
+class NivelUmbral(BaseModel):
+    nivel: Literal["normal", "precaucion", "critico"]
+    limite_inferior: float
+    limite_superior: float
+
+
+class UmbralCommandRequest(BaseModel):
+    """Umbral ambiental de una especie hacia un Gateway Edge (RF-17, INC-M09-104-G29).
+
+    El backend resuelve a qué Gateway Edge le corresponde el umbral (los de las
+    áreas de esa especie) y llama una vez por `serial` de Gateway. `version` es
+    la `fecha_actualizacion` del umbral: deja que el Edge descarte una versión
+    más vieja que llegue tarde. `variable` es el mismo nombre que el Edge usa en
+    el campo `variable` de la telemetría.
+    """
+
+    origen: Literal["umbral"]
+    serial: str
+    id_umbral_ambiental: int = Field(gt=0)
+    version: datetime | None = None
+    variable: str = Field(min_length=1)
+    unidad: str
+    valor_min: float
+    valor_max: float
+    niveles: list[NivelUmbral] = Field(min_length=1)
+
+
+ComandoRequest = Annotated[CommandRequest | UmbralCommandRequest, Field(discriminator="origen")]
 
 
 class CommandResponse(BaseModel):
@@ -78,3 +136,22 @@ class CommandResponse(BaseModel):
     topic: str | None = None
     estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
     mensaje: str
+
+
+# Mismo allow-list que SerialDispositivo en sgpmp-backend. Además es una barrera
+# de seguridad acá: el serial termina dentro de nombres de rol y de topics de la
+# ACL de dynamic-security, donde un '#', '+' o '/' abriría permisos ajenos.
+PATRON_SERIAL = r"^[A-Za-z0-9_-]{1,50}$"
+
+
+class CredencialResponse(BaseModel):
+    usuario: str
+    password: str
+    seriales: list[str]
+
+
+class EstadoCredencialResponse(BaseModel):
+    usuario: str
+    habilitada: bool
+    conectada: bool
+    seriales: list[str]
