@@ -128,7 +128,63 @@ class UmbralCommandRequest(BaseModel):
     niveles: list[NivelUmbral] = Field(min_length=1)
 
 
-ComandoRequest = Annotated[CommandRequest | UmbralCommandRequest, Field(discriminator="origen")]
+# BRK-05 (D7 de AIOT-DEV-03): tres comandos nuevos por el mismo patrón de RF-17.
+# El broker fija el sobre (a qué nodo, qué versión, cómo se confirma); el
+# contenido de la regla y de la configuración del motor lo arma el backend
+# desde su tabla y lo interpreta el firmware, así que aquí viaja tal cual.
+
+
+class ReglaCompuestaCommandRequest(BaseModel):
+    """Regla compuesta de `modulo3.reglas_alertas` hacia un Gateway Edge (RF-55/RF-57).
+
+    El nodo la guarda junto a sus umbrales y la evalúa con prevalencia sobre la
+    regla simple (RF-57 E14/E15). `version_regla` deja que descarte una versión
+    más vieja que llegue tarde; `es_activa=False` le pide retirarla.
+    """
+
+    origen: Literal["regla_compuesta"]
+    serial: str
+    id_regla_alerta: int = Field(gt=0)
+    version_regla: int = Field(ge=1)
+    es_activa: bool = True
+    regla: dict[str, Any] = Field(min_length=1)
+
+
+class ConfigMotorCommandRequest(BaseModel):
+    """Configuración del motor de IA de `modulo4.configuraciones_motor_ia` (RF-65).
+
+    El nodo confirma con `ACK_CONFIG_MOTOR` y el `config_version` que quedó
+    activo; el backend lo compara con el suyo (`sincronizacion_nodos_edge`).
+    """
+
+    origen: Literal["config_motor"]
+    serial: str
+    tipo_modelo: str = Field(min_length=1)
+    config_version: int = Field(ge=1)
+    configuracion: dict[str, Any] = Field(min_length=1)
+
+
+class TipoModeloCommandRequest(BaseModel):
+    """`tipo_modelo_asignado` de un área (M09·RF-20, D-06).
+
+    El nodo reinicia su módulo de procesamiento con el esquema nuevo y conserva
+    la calibración activa.
+    """
+
+    origen: Literal["tipo_modelo"]
+    serial: str
+    id_infraestructura: int = Field(gt=0)
+    tipo_modelo_asignado: str = Field(min_length=1)
+
+
+ComandoRequest = Annotated[
+    CommandRequest
+    | UmbralCommandRequest
+    | ReglaCompuestaCommandRequest
+    | ConfigMotorCommandRequest
+    | TipoModeloCommandRequest,
+    Field(discriminator="origen"),
+]
 
 
 class CommandResponse(BaseModel):
@@ -136,6 +192,9 @@ class CommandResponse(BaseModel):
     topic: str | None = None
     estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
     mensaje: str
+    # BRK-05: el `config_version` que el nodo informa en su ACK (CONFIG_MOTOR_IA).
+    # None en los demás comandos o si el ACK no lo trae.
+    config_version: int | None = None
 
 
 # Mismo allow-list que SerialDispositivo en sgpmp-backend. Además es una barrera

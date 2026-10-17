@@ -225,7 +225,13 @@ async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) ->
         return heartbeat_id
 
 
-_TIPOS_ACK = {correlacion.ACK_CONFIGURACION, correlacion.ACK_UMBRAL}
+_TIPOS_ACK = {
+    correlacion.ACK_CONFIGURACION,
+    correlacion.ACK_UMBRAL,
+    correlacion.ACK_REGLA,  # BRK-05
+    correlacion.ACK_CONFIG_MOTOR,  # BRK-05: trae config_version
+    correlacion.ACK_TIPO_MODELO,  # BRK-05
+}
 
 
 async def ingest_status(serial: str, data: dict) -> None:
@@ -237,7 +243,10 @@ async def ingest_status(serial: str, data: dict) -> None:
     El `id_comando` es el que llegó en el comando; solo un ACK que lo devuelva
     resuelve la espera (TC-M09-252, anti-replay). El ACK de un umbral (RF-17)
     es igual con ``"tipo_mensaje": "ACK_UMBRAL"``; cada tipo solo resuelve
-    comandos de su mismo tipo.
+    comandos de su mismo tipo. Los de BRK-05 (``ACK_REGLA``, ``ACK_CONFIG_MOTOR``
+    y ``ACK_TIPO_MODELO``) siguen el mismo formato; ``ACK_CONFIG_MOTOR`` agrega
+    el ``config_version`` que quedó activo en el nodo, que /v1/commands
+    devuelve al backend.
 
     Si hay una espera de comando pendiente para este `serial`
     (dispatch_command la crea al publicar), se resuelve acá -- eso es lo que
@@ -259,6 +268,7 @@ async def ingest_status(serial: str, data: dict) -> None:
             data.get("id_comando"),
             tipo_ack=tipo_mensaje,
             exigir_id=get_settings().mqtt_ack_requiere_id_comando,
+            datos=data,
         )
         if not resuelto:
             logger.info(

@@ -213,6 +213,24 @@ ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo I
 }
 ```
 
+Comandos de D7 (BRK-05, `.../command`, mismo patrón de RF-17). El backend llama
+`POST /v1/commands` con uno de estos `origen`; el broker publica con su
+`tipo_comando`, `id_comando` y `emitido_en`, y espera el ACK de su mismo tipo
+en `status` (`{"tipo_mensaje": "<ACK>", "resultado": "OK", "id_comando": ...}`).
+El contenido de `regla` y `configuracion` lo arma el backend desde su tabla y
+lo interpreta el firmware: el broker no lo valida por dentro.
+
+| `origen` | `tipo_comando` | ACK | Campos |
+|---|---|---|---|
+| `regla_compuesta` | `REGLA_COMPUESTA` | `ACK_REGLA` | `id_regla_alerta`, `version_regla`, `es_activa`, `regla` |
+| `config_motor` | `CONFIG_MOTOR_IA` | `ACK_CONFIG_MOTOR` (*) | `tipo_modelo`, `config_version`, `configuracion` |
+| `tipo_modelo` | `TIPO_MODELO_ASIGNADO` | `ACK_TIPO_MODELO` (*) | `id_infraestructura`, `tipo_modelo_asignado` |
+
+(*) Nombre propuesto por Desarrollo; AIoT lo confirma en su PR del firmware.
+`ACK_CONFIG_MOTOR` trae además el `config_version` que quedó activo en el nodo:
+la respuesta de `/v1/commands` lo devuelve en `config_version` para que el
+backend lo compare con el suyo (RF-65 E10).
+
 Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
 Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
 broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y
