@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -214,6 +214,33 @@ class CommandResponse(BaseModel):
 # de seguridad acá: el serial termina dentro de nombres de rol y de topics de la
 # ACL de dynamic-security, donde un '#', '+' o '/' abriría permisos ajenos.
 PATRON_SERIAL = r"^[A-Za-z0-9_-]{1,50}$"
+
+
+class OtaNotifyRequest(BaseModel):
+    """Pedido del backend para avisar a un nodo de una OTA de modelo (BRK-08, D6 paso 3).
+
+    El nodo descarga el artefacto por HTTPS (`url_descarga`, firmada y temporal, con
+    `Range`), verifica `sha256` y `firma`, instala y reporta por `ota/<evento>`.
+    `parametros` lleva las reglas de la distribución (fragmento, reintentos, batería
+    mínima, ventana) tal como las define el backend; el broker no las interpreta.
+    """
+
+    serial: str = Field(pattern=PATRON_SERIAL)
+    id_despliegue_ota: int = Field(gt=0)
+    tipo_modelo: str = Field(min_length=1)
+    componente: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    url_descarga: HttpUrl
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    firma: str | None = None
+    tamano_bytes: int | None = Field(default=None, gt=0)
+    parametros: dict[str, Any] = Field(default_factory=dict)
+
+
+class OtaNotifyResponse(BaseModel):
+    serial: str
+    topic: str
+    id_mensaje: str
 
 
 class CredencialResponse(BaseModel):

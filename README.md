@@ -327,6 +327,7 @@ inverso, fuera de alcance de RF-23 en su primera entrega).
 | `GET` | `/v1/healthz` | Salud del servicio | — |
 | `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) o un umbral a un Gateway Edge (RF-17) | Bearer |
 | `GET` | `/v1/devices` | Estado de dispositivos IoT | Bearer |
+| `POST` | `/v1/ota/notify` | Aviso de OTA de modelo a un nodo (BRK-08); `202` al publicar, `503` sin MQTT | Bearer |
 
 `POST /v1/commands` es síncrono: si el dispositivo está `ACTIVO`
 (`modulo3.estados_dispositivos_iot`), publica el comando y espera hasta
@@ -342,6 +343,29 @@ curl -X POST http://localhost:8000/v1/commands \
   -H "Authorization: Bearer <TOKEN_DE_SERVICIO>" \
   -H "Content-Type: application/json" \
   -d '{"origen": "configuracion", "serial": "IOT-EST01-HLA-001", "frecuencia_captura": 60, "intervalo_transmision": 300}'
+```
+
+`POST /v1/ota/notify` (BRK-08, D6 paso 3) no espera la instalación: publica en
+`sgpmp/<serial>/ota/notify` (QoS 1; con la sesión persistente del Edge,
+Mosquitto lo entrega al reconectar) y responde `202` con el `id_mensaje` del
+aviso. El nodo reporta el avance por `ota/<evento>`, que el broker reenvía a
+`POST /prediccion/ota/reportes`. `parametros` (fragmento, reintentos, batería
+mínima, ventana) viaja tal cual desde el backend. Contrato propuesto por
+Desarrollo hasta que DEV-15 fije el suyo:
+
+```json
+{
+  "serial": "EDGE-REMANSO-01",
+  "id_despliegue_ota": 31,
+  "tipo_modelo": "AVES",
+  "componente": "DETECTOR",
+  "version": "3.0.0",
+  "url_descarga": "https://.../prediccion/ota/artefactos/31?firma=...&expira=...",
+  "sha256": "<64 hex en minúsculas>",
+  "firma": "<firma del artefacto>",
+  "tamano_bytes": 1048576,
+  "parametros": {"tamano_fragmento_bytes": 65536, "max_reintentos_descarga": 5}
+}
 ```
 
 Respuestas posibles (siempre `200` si el request es válido — el resultado
