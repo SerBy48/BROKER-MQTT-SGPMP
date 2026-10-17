@@ -1,0 +1,5 @@
+# Los scripts .sh se ejecutan dentro de contenedores Linux (Dockerfile.mosquitto
+# corre docker/mosquitto-entrypoint.sh) — con CRLF el shebang falla ("no such
+# file or directory") en checkouts con core.autocrlf=true (default en muchas
+# instalaciones de Git en Windows). Forzar LF sin importar la config local.
+*.sh text eol=lf
