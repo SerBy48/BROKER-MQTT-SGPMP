@@ -53,6 +53,13 @@ class Settings(BaseSettings):
     # un ACK capturado y reenviado (o forjado sin id) deja de resolver comandos.
     mqtt_ack_requiere_id_comando: bool = False
 
+    # BRK-02 (P3 de AIOT-DEV-03): cliente HTTP broker -> sgpmp-backend para los
+    # eventos de control de bajo volumen (buffer, visión, eventos Edge, OTA). El
+    # token es el mismo BROKER_SERVICE_TOKEN del backend; va solo en el entorno.
+    backend_url: str = ""
+    broker_service_token: str = ""
+    backend_timeout_seconds: float = 10.0
+
     # API HTTPS (0.0.0.0 requerido dentro de contenedor Docker)
     api_host: str = "0.0.0.0"  # nosec B104
     api_port: int = 8000
