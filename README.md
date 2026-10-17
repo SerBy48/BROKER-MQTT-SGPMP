@@ -231,6 +231,23 @@ lo interpreta el firmware: el broker no lo valida por dentro.
 la respuesta de `/v1/commands` lo devuelve en `config_version` para que el
 backend lo compare con el suyo (RF-65 E10).
 
+Aviso de buffer (`.../status`, BRK-06 / D10 de AIOT-DEV-03). El broker lo
+reenvía a `POST /iot/eventos-buffer` del backend con el `serial` del topic y su
+token de servicio (BRK-02); el backend crea la alerta técnica RF-60 y el evento
+RF-63. El reenvío corre aparte del bucle MQTT: un backend lento no frena la
+telemetría. Si el backend no responde, el evento queda en el log del broker.
+
+```json
+{
+  "tipo_mensaje": "EVENTO_BUFFER",
+  "evento": "BUFFER_OVERFLOW | BUFFER_DATA_CORRUPTION",
+  "porcentaje_ocupacion": 100.0,
+  "politica_aplicada": "POLITICA_RECHAZO",
+  "cantidad_datos_afectados": 12,
+  "timestamp_evento": "2026-10-17T10:00:00-05:00"
+}
+```
+
 Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
 Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
 broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y

@@ -16,6 +16,7 @@ from app.db.repositories import registry
 from app.db.repositories import telemetry as telemetry_repo
 from app.mqtt import correlacion, presencia, publisher
 from app.schemas import HeartbeatPayload, TelemetryPayload
+from app.services import reenvio
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ _RECHAZOS_DEFINITIVOS = frozenset({
 LIBERAR = "LIBERAR"
 RETENER = "RETENER"
 TIPO_RESULTADO_INGESTA = "RESULTADO_INGESTA"
+
+# BRK-06 (D10 de AIOT-DEV-03): aviso de buffer del Edge por `status`.
+TIPO_EVENTO_BUFFER = "EVENTO_BUFFER"
+RUTA_EVENTOS_BUFFER = "/iot/eventos-buffer"
+_CAMPOS_EVENTO_BUFFER = (
+    "evento",
+    "porcentaje_ocupacion",
+    "politica_aplicada",
+    "cantidad_datos_afectados",
+    "timestamp_evento",
+)
 
 
 @dataclass(frozen=True)
@@ -261,6 +273,13 @@ async def ingest_status(serial: str, data: dict) -> None:
         # Last Will o cierre ordenado del Edge (TC-M09-63): los comandos que van
         # por él quedan PENDIENTE al instante en vez de esperar el ACK.
         presencia.marcar_desconectado(serial)
+        return
+    if tipo_mensaje == TIPO_EVENTO_BUFFER:
+        # El backend lo convierte en alerta técnica RF-60 + evento RF-63 (DEV-11) y
+        # valida el sobre: aquí solo se le agrega el serial del topic, que ya
+        # autenticó la ACL de MQTT.
+        cuerpo = {"serial": serial, **{c: data.get(c) for c in _CAMPOS_EVENTO_BUFFER}}
+        reenvio.reenviar(RUTA_EVENTOS_BUFFER, cuerpo, f"{TIPO_EVENTO_BUFFER} de {serial}")
         return
     if tipo_mensaje in _TIPOS_ACK and data.get("resultado") == "OK":
         resuelto = correlacion.resolver_ack(
