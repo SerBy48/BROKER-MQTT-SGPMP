@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     mqtt_topic_heartbeat: str = "heartbeat"
     mqtt_topic_command: str = "command"
     mqtt_topic_status: str = "status"
+    # BRK-01 (D2 de AIOT-DEV-03): aviso al nodo del resultado de cada ingesta de
+    # telemetría, para que libere o retenga su buffer. Topic propio (broker -> nodo):
+    # el firmware actual trata todo `command` sin tipo_comando como configuración
+    # RF-23. Formato propuesto por Desarrollo; AIoT lo confirma en FW-01.
+    mqtt_topic_resultado: str = "resultado"
 
     # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
     # de responder NO_CONF.

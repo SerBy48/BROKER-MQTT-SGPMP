@@ -159,6 +159,7 @@ sgpmp/<serial>/telemetry    # IoT -> SGPMP (telemetría)
 sgpmp/<serial>/heartbeat    # IoT -> SGPMP (heartbeat)
 sgpmp/<serial>/status       # IoT -> SGPMP (ACK / cambio de estado)
 sgpmp/<serial>/command      # SGPMP -> IoT (comando)
+sgpmp/<serial>/resultado    # SGPMP -> IoT (resultado de cada ingesta, BRK-01)
 ```
 
 El `serial` es el `serial` único de `modulo9.dispositivos_iot` (ej.
@@ -211,6 +212,41 @@ ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo I
   "resultado": "OK"
 }
 ```
+
+Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
+Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
+broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y
+lo deja también en `transmisiones_mqtt.estado`:
+
+```json
+{
+  "tipo_mensaje": "RESULTADO_INGESTA",
+  "id_mensaje": "<eco del id_mensaje de la lectura, si lo trae>",
+  "sensor": "dht22",
+  "variable": "Temperatura del agua",
+  "timestamp_captura": "2026-08-17T14:00:00Z",
+  "resultado": "EXITO | FALLIDO | TIMEOUT",
+  "accion_buffer": "LIBERAR | RETENER",
+  "codigo": "LECTURA_VALIDA | FUERA_DE_RANGO | ERROR_CALIBRACION | ERROR_* | ERROR_PERSISTENCIA",
+  "mensaje": "ERROR_TIEMPO: timestamp_captura futuro.",
+  "id_telemetria": 123
+}
+```
+
+| Resultado de la función | `transmisiones_mqtt.estado` | `accion_buffer` |
+|---|---|---|
+| Persistida (`id_telemetria` no nulo) | `EXITO` | `LIBERAR` |
+| `ERROR_DUPLICADO` (ya estaba persistida) | `FALLIDO` + `error_descripcion` | `LIBERAR` |
+| `ERROR_ESTRUCTURA` / `ERROR_AUTENTICACION` / `ERROR_TIEMPO` / `ERROR_UNIDAD` / `ERROR_SENSOR` | `FALLIDO` + `error_descripcion` | `LIBERAR` (rechazo definitivo) |
+| Excepción, timeout o BD caída | `FALLIDO` / `TIMEOUT` si se puede escribir | `RETENER` (reintentar con backoff, RF-54) |
+
+El nodo correlaciona el aviso con su lectura por `id_mensaje` (campo opcional de
+la telemetría que el broker devuelve tal cual) o, si no lo manda, por
+`(sensor, variable, timestamp_captura)`. Va en un topic propio y no en
+`command` porque el firmware actual trata todo `command` sin `tipo_comando`
+como una configuración RF-23. Hasta que el Edge se suscriba (FW-01) el aviso no
+tiene suscriptores y se descarta sin efecto; mientras tanto el Edge sigue
+liberando con el PUBACK.
 
 Si llega mientras `/v1/commands` está esperando el ACK de ese `serial`
 (dentro de `MQTT_ACK_TIMEOUT_SECONDS`), la request en curso responde
