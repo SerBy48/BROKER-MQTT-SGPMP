@@ -37,104 +37,72 @@ name: sgpmp-broker-prod
 
 services:
   mosquitto:
-    # Build en vez de "image:" directo: necesita el entrypoint que genera el
-    # archivo de contrasenas al arrancar (ver Dockerfile.mosquitto). El digest
-    # de eclipse-mosquitto:2 base sigue fijado ahi mismo. Ni el Dockerfile ni
-    # docker/mosquitto.conf ni docker/mosquitto-entrypoint.sh se modifican
-    # para PROD: se despliega exactamente la misma imagen que se valido.
+    # Build en vez de "image:" directo: necesita el entrypoint que prepara
+    # dynamic-security.json y, si hay certificados, los listeners TLS (ver
+    # Dockerfile.mosquitto). El digest de eclipse-mosquitto:2 base sigue fijado
+    # ahi mismo. Ni el Dockerfile ni docker/mosquitto.conf ni
+    # docker/mosquitto-entrypoint.sh se modifican para PROD: se despliega
+    # exactamente la misma imagen que se valido.
     build:
       context: .
       dockerfile: Dockerfile.mosquitto
     environment:
-      # Credencial del GATEWAY. Es la misma que recibe el servicio `gateway`
-      # mas abajo: las dos puntas tienen que coincidir.
+      # Admin de dynamic-security = el gateway (SEG-BROKER-03). Es la misma
+      # credencial que recibe el servicio `gateway` mas abajo: las dos puntas
+      # tienen que coincidir. Cada Gateway Edge tiene su propia credencial,
+      # generada desde la plataforma (POST /v1/devices/{serial}/credential).
       MQTT_USERNAME: ${MQTT_USERNAME:?MQTT_USERNAME es obligatoria en PROD (credencial del gateway, la provee AIoT)}
       MQTT_PASSWORD: ${MQTT_PASSWORD:?MQTT_PASSWORD es obligatoria en PROD (credencial del gateway, la provee AIoT)}
-      # Credencial COMPARTIDA de los dispositivos de campo, usuario aparte del
-      # gateway. El compose de TEST de este repositorio NO las pasa, pese a
-      # que develop las agrego el 1 de septiembre (commit a36051f,
-      # "MQTT_DEVICE_USERNAME/PASSWORD nunca llegaban al contenedor").
-      # Consecuencia en TEST: el entrypoint nunca crea el segundo usuario y,
-      # con `allow_anonymous false` en docker/mosquitto.conf, NINGUN
-      # dispositivo puede autenticarse contra ese broker; solo el gateway.
-      # Aqui se pasan las cuatro a proposito. No replicar la omision.
-      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME:?MQTT_DEVICE_USERNAME es obligatoria en PROD (credencial de los dispositivos, la provee AIoT)}
-      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD:?MQTT_DEVICE_PASSWORD es obligatoria en PROD (credencial de los dispositivos, la provee AIoT)}
+      # Credencial COMPARTIDA legacy (TC-M09-250/251): OPCIONAL. Solo existe
+      # para no cortar a los Edge que todavia no migraron a su credencial
+      # propia. PROD arranca con credenciales por Edge, asi que lo esperado es
+      # dejarlas vacias. Si se definen, el entrypoint rota su clave y el
+      # gateway la mantiene en dynamic-security con la ACL legacy.
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME:-}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD:-}
+      # TC-M09-253: puertos del CONTENEDOR que se publican al host. En PROD el
+      # default es solo TLS (8883 mqtts / 9002 wss); el texto plano (1883/9001)
+      # queda unicamente dentro de la red interna, donde lo usa el gateway. El
+      # entrypoint aborta el arranque si se pide TLS y faltan los certificados
+      # en ./docker/certs: falla visible en vez de exponer texto plano.
+      MQTT_PUERTO_PUBLICO: ${MQTT_PUERTO_PUBLICO:-8883}
+      MQTT_WS_PUERTO_PUBLICO: ${MQTT_WS_PUERTO_PUBLICO:-9002}
     # MQTT no es HTTP: Traefik/el dominio de Dokploy no lo enruta, asi que
     # este es el unico servicio del stack que necesita puerto de host
     # publicado explicitamente. Pedir que lo habiliten en el firewall.
     #
-    # SIN valor por defecto, a diferencia de DEV (1884/9001) y TEST
-    # (1885/9002): el puerto de PROD esta pendiente de confirmacion por AIoT y
-    # Despliegue, y un default silencioso llevaria a desplegar con un puerto
-    # que nadie acordo. El 1883 estandar NO esta disponible en el servidor
-    # compartido: lo ocupa el contenedor EMQX de otro proyecto (verificado en
-    # vivo, ver el comentario del compose de TEST).
+    # Puertos de HOST SIN valor por defecto, a diferencia de DEV (1884/9001) y
+    # TEST (1885/9002): el puerto de PROD esta pendiente de confirmacion por
+    # AIoT y Despliegue, y un default silencioso llevaria a desplegar con un
+    # puerto que nadie acordo. El 1883 estandar NO esta disponible en el
+    # servidor compartido: lo ocupa el contenedor EMQX de otro proyecto.
     #
     # Publicar puertos NO depende de estar en la red compartida: mosquitto
     # vive solo en `broker-interna` (ver la seccion `networks` al final) y aun
-    # asi los dispositivos lo alcanzan por MQTT_HOST_PORT. El mapeo de puertos
-    # es independiente de las redes a las que se une el contenedor.
+    # asi los dispositivos lo alcanzan por MQTT_HOST_PORT.
     #
     # OJO: la variable se llama MQTT_HOST_PORT, no MQTT_PORT. El gateway
     # (app/config.py) tambien lee una env var MQTT_PORT, pero para el puerto
     # INTERNO de conexion (mosquitto:1883, no cambia nunca). Si aca se usa el
     # mismo nombre, Dokploy inyecta el valor del puerto de host tambien dentro
     # del contenedor del gateway, que entonces intenta conectar a
-    # mosquitto:<puerto publicado> -donde no escucha nada- en vez de
-    # mosquitto:1883, y produce un "Connection refused" permanente. Ya paso
-    # una vez.
+    # mosquitto:<puerto publicado> y produce un "Connection refused"
+    # permanente. Ya paso una vez.
     ports:
-      - "${MQTT_HOST_PORT:?MQTT_HOST_PORT es obligatoria en PROD (puerto MQTT publicado al host, pendiente de confirmar por AIoT y Despliegue)}:1883"
-      - "${MQTT_WS_HOST_PORT:?MQTT_WS_HOST_PORT es obligatoria en PROD (puerto WebSocket publicado al host, pendiente de confirmar por AIoT y Despliegue)}:9001"
-      # TLS, PREPARADO Y DESACTIVADO. Ver el bloque de abajo antes de
-      # descomentar:
-      # - "${MQTT_TLS_HOST_PORT:-8883}:8883"
+      - "${MQTT_HOST_PORT:?MQTT_HOST_PORT es obligatoria en PROD (puerto MQTT publicado al host, pendiente de confirmar por AIoT y Despliegue)}:${MQTT_PUERTO_PUBLICO:-8883}"
+      - "${MQTT_WS_HOST_PORT:?MQTT_WS_HOST_PORT es obligatoria en PROD (puerto WebSocket publicado al host, pendiente de confirmar por AIoT y Despliegue)}:${MQTT_WS_PUERTO_PUBLICO:-9002}"
     volumes:
       - ./docker/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
-      # Volumen nombrado en un directorio aparte (no /mosquitto/config, que ya
-      # tiene el bind mount de arriba): docker/passwd esta gitignoreado y no
-      # existe en un clone nuevo, asi que el entrypoint genera el archivo de
-      # contrasenas dentro de este volumen en el primer arranque y persiste
-      # entre reinicios y redeploys. docker/mosquitto.conf apunta su
-      # password_file aca.
+      # Certificados TLS (fullchain.pem/privkey.pem, convencion Let's
+      # Encrypt/certbot): gitignoreados, los provee Ops por ambiente. Ver
+      # docker/certs/README.md.
+      - ./docker/certs:/mosquitto/certs:ro
+      # dynamic-security.json (SEG-BROKER-03): usuarios, roles y hashes de
+      # contrasena de todas las credenciales MQTT. Persiste entre reinicios y
+      # redeploys. Perderlo obliga a regenerar e instalar la credencial de
+      # cada Gateway Edge: respaldarlo (Volume Backups de Dokploy). Recrear el
+      # compose en Dokploy cambia el nombre del volumen, que arranca vacio.
       - mosquitto_secrets_prod:/mosquitto/secrets
-      # TLS, desactivado: certificados en solo lectura, nunca versionados.
-      # - ./docker/certs:/mosquitto/certs:ro
-    #
-    # ------------------------------------------------------------------
-    # TLS: preparado, no habilitado.
-    # ------------------------------------------------------------------
-    # docker/mosquitto.conf declara hoy dos listeners EN CLARO (1883 y 9001),
-    # ambos con `allow_anonymous false` y archivo de contrasenas. Hay
-    # autenticacion, pero NO cifrado: las credenciales de los dispositivos
-    # viajan en texto plano. PROD deberia exigir TLS, pero el mecanismo esta
-    # pendiente de definicion por AIoT (hay tres caminos sobre la mesa:
-    # certificado de Let's Encrypt emitido aparte, CA privada con el
-    # certificado embebido en el firmware, o terminacion TLS en un router TCP
-    # de Traefik) y ninguno esta decidido.
-    #
-    # Para activarlo hacen falta CUATRO cosas, y ninguna se resuelve solo en
-    # este archivo:
-    #   1) docker/mosquitto.conf: agregar un listener nuevo (`listener 8883` +
-    #      `cafile`/`certfile`/`keyfile` + `allow_anonymous false` +
-    #      `password_file /mosquitto/secrets/passwd`). Ese archivo pertenece a
-    #      AIoT y no se modifica desde este lado.
-    #   2) Certificados reales en ./docker/certs, que hoy no existe. La clave
-    #      privada debe quedar legible por el usuario `mosquitto`, al que el
-    #      proceso baja privilegios tras arrancar.
-    #   3) Abrir MQTT_TLS_HOST_PORT en el firewall del host, igual que
-    #      MQTT_HOST_PORT.
-    #   4) Firmware de los dispositivos: apuntar al puerto TLS y confiar en la
-    #      CA elegida.
-    # El gateway NO cambia: MQTT_TLS sigue en false porque habla con
-    # mosquitto:1883 por la red interna del stack; el cifrado es para los
-    # dispositivos que llegan de afuera.
-    #
-    # Se deja COMENTADO a proposito y no activo: ./docker/certs no existe y
-    # `docker compose up` crearia ahi un directorio vacio propiedad de root,
-    # ensuciando el arbol de trabajo durante la validacion.
-    # ------------------------------------------------------------------
     #
     # Healthcheck: se AUTENTICA, obligatoriamente. Con `allow_anonymous false`
     # una comprobacion sin credenciales no puede ni conectarse, asi que
@@ -157,8 +125,8 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      # El entrypoint solo corre dos `mosquitto_passwd -b` (milisegundos) y
-      # hace exec del broker, que abre el socket enseguida. 10s ya es holgado.
+      # El entrypoint solo prepara dynamic-security.json y los listeners TLS
+      # (milisegundos) y hace exec del broker. 10s ya es holgado.
       start_period: 10s
     # `always` y no `unless-stopped`: la diferencia importa tras un reboot del
     # servidor. `unless-stopped` NO vuelve a levantar el contenedor si habia
@@ -258,6 +226,26 @@ services:
       # de responder NO_CONF. Es contrato con el backend; cambiarlo aqui sin
       # coordinarlo alli desalinea los dos timeouts.
       MQTT_ACK_TIMEOUT_SECONDS: ${MQTT_ACK_TIMEOUT_SECONDS:-30}
+      # TC-M09-252 (anti-replay): true exige que cada ACK devuelva el
+      # id_comando. Pasar a true cuando AIoT confirme que todo el firmware de
+      # PROD ya lo devuelve.
+      MQTT_ACK_REQUIERE_ID_COMANDO: ${MQTT_ACK_REQUIERE_ID_COMANDO:-false}
+      # BRK-01: aviso al nodo del resultado de cada ingesta.
+      MQTT_TOPIC_RESULTADO: ${MQTT_TOPIC_RESULTADO:-resultado}
+      # Credencial compartida legacy (opcional, ver el servicio mosquitto): el
+      # gateway tambien la lee, para mantenerla en dynamic-security mientras
+      # exista o borrarla cuando se quite.
+      MQTT_DEVICE_USERNAME: ${MQTT_DEVICE_USERNAME:-}
+      MQTT_DEVICE_PASSWORD: ${MQTT_DEVICE_PASSWORD:-}
+      # BRK-02: el broker reenvia los eventos de control (buffer, vision,
+      # eventos Edge, OTA) a endpoints internos de sgpmp-backend, autenticado
+      # con BROKER_SERVICE_TOKEN (el mismo valor que tiene el backend). Por
+      # `sgpmp-network`, con el nombre del servicio del backend y su puerto
+      # interno, igual que DB_HOST: nunca el dominio publico ni un puerto
+      # publicado.
+      BACKEND_URL: ${BACKEND_URL:?BACKEND_URL es obligatoria en PROD (URL interna de sgpmp-backend en sgpmp-network)}
+      BROKER_SERVICE_TOKEN: ${BROKER_SERVICE_TOKEN:?BROKER_SERVICE_TOKEN es obligatoria en PROD (token de servicio broker -> backend, mismo valor que el backend)}
+      BACKEND_TIMEOUT_SECONDS: ${BACKEND_TIMEOUT_SECONDS:-10}
       API_HOST: ${API_HOST:-0.0.0.0}
       API_PORT: ${API_PORT:-8000}
     # No se publica puerto de host: Traefik enruta por dominio en Dokploy
@@ -352,9 +340,8 @@ volumes:
   # colisionar con el `mosquitto_secrets` de DEV aunque convivan en el mismo
   # host; el sufijo es por simetria y legibilidad.
   #
-  # OJO al rotar credenciales: el entrypoint hace upsert de usuarios, nunca
-  # los borra. Cambiar MQTT_DEVICE_USERNAME por otro nombre deja el usuario
-  # viejo valido para siempre dentro de este volumen. Revocar una credencial
-  # comprometida exige un `mosquitto_passwd -D` manual dentro del contenedor,
-  # no basta con cambiar la variable en Dokploy.
+  # Guarda dynamic-security.json: perderlo obliga a regenerar la credencial
+  # de cada Gateway Edge. Revocar una credencial comprometida se hace desde la
+  # plataforma (DELETE /v1/devices/{serial}/credential), que la deshabilita y
+  # desconecta en el acto; no hace falta entrar al contenedor.
   mosquitto_secrets_prod:
