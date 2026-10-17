@@ -47,8 +47,19 @@ class TelemetryPayload(BaseModel):
 _ESTADOS_BUFFER = {"I": "I", "A": "A", "L": "L", "INACTIVO": "I", "ACTIVO": "A", "LLENO": "L"}
 
 
+class SensorOperativo(BaseModel):
+    # `sensor`: el mismo identificador que viaja en el campo `sensor` de la telemetría.
+    sensor: str = Field(min_length=1)
+    operativo: bool
+
+
 class HeartbeatPayload(BaseModel):
-    """Payload esperado en el topic `<prefix>/<serial>/heartbeat`."""
+    """Payload esperado en el topic `<prefix>/<serial>/heartbeat`.
+
+    `sensores_operativos` y `temperatura_dispositivo` son de D11 (AIOT-DEV-03,
+    BRK-07): opcionales, porque el firmware que aún no los manda debe seguir
+    funcionando, y solo se guardan si la BD ya tiene sus columnas (DB-03).
+    """
 
     tipo_mensaje: TipoMensajeIot = TipoMensajeIot.HEARTBEAT
     nivel_bateria_pct: float | None = None
@@ -60,6 +71,8 @@ class HeartbeatPayload(BaseModel):
     coordenadas: dict[str, Any] | None = None
     fecha_registro: datetime | None = None
     reloj_sincronizado: bool = False
+    sensores_operativos: list[SensorOperativo] | None = None
+    temperatura_dispositivo: float | None = Field(default=None, allow_inf_nan=False)  # °C
 
     @field_validator("estado_local_buffer")
     @classmethod

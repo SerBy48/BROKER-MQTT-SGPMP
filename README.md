@@ -200,9 +200,17 @@ Heartbeat (`.../heartbeat`):
   "datos_pendientes_buffer": 0,
   "version_firmware": "1.0.0",
   "coordenadas": {"lat": 0, "lon": 0},
-  "reloj_sincronizado": true
+  "reloj_sincronizado": true,
+  "sensores_operativos": [{"sensor": "dht22", "operativo": true}],
+  "temperatura_dispositivo": 48.5
 }
 ```
+
+`sensores_operativos` y `temperatura_dispositivo` (°C) son de D11 (BRK-07),
+opcionales: `sensor` es el mismo identificador que viaja en el campo `sensor`
+de la telemetría. Se guardan en `modulo3.heartbeats.json_sensores_operativos` y
+`temperatura_dispositivo` cuando la migración DB-03 del backend está aplicada;
+antes de eso el broker los descarta y el heartbeat se guarda como siempre.
 
 ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo IoT):
 
