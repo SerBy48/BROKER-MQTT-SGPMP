@@ -43,6 +43,7 @@ from app.db.repositories import registry
 from app.db.repositories.registry import EstadoDispositivo
 from app.mqtt import dynsec, presencia
 from app.schemas import PATRON_SERIAL
+from app.services.reenvio_nodo import EVENTOS_OTA_NODO, OTA_NOTIFY
 
 logger = logging.getLogger(__name__)
 
@@ -79,17 +80,31 @@ def _acl(tipo: str, topic: str) -> dict:
 
 
 def _topics_hacia_el_nodo(settings: Settings) -> tuple[str, ...]:
-    """Lo que el broker publica al nodo: comandos y el resultado de la ingesta (BRK-01)."""
-    return settings.mqtt_topic_command, settings.mqtt_topic_resultado
+    """Lo que el broker publica al nodo: comandos, el resultado de la ingesta (BRK-01)
+    y el aviso de OTA (BRK-08)."""
+    return (
+        settings.mqtt_topic_command,
+        settings.mqtt_topic_resultado,
+        f"{settings.mqtt_topic_ota}/{OTA_NOTIFY}",
+    )
+
+
+def _topics_desde_el_nodo(settings: Settings) -> tuple[str, ...]:
+    """Lo que el nodo publica. Los reportes OTA van uno por uno, sin comodín: el nodo
+    no puede publicar en `ota/notify` ni en un `ota/<evento>` fuera del contrato (D6)."""
+    return (
+        settings.mqtt_topic_telemetry,
+        settings.mqtt_topic_heartbeat,
+        settings.mqtt_topic_status,
+        settings.mqtt_topic_vision,  # BRK-03
+        settings.mqtt_topic_evento,  # BRK-04
+        *(f"{settings.mqtt_topic_ota}/{e}" for e in EVENTOS_OTA_NODO),  # BRK-08
+    )
 
 
 def _acls_dispositivo(settings: Settings, serial: str, suscripcion: str) -> list[dict]:
     p = settings.mqtt_topic_prefix
-    propios = (
-        settings.mqtt_topic_telemetry,
-        settings.mqtt_topic_heartbeat,
-        settings.mqtt_topic_status,
-    )
+    propios = _topics_desde_el_nodo(settings)
     recibidos = [f"{p}/{serial}/{t}" for t in _topics_hacia_el_nodo(settings)]
     return [
         *(_acl("publishClientSend", f"{p}/{serial}/{t}") for t in propios),

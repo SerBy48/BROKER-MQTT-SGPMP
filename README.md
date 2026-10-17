@@ -160,6 +160,11 @@ sgpmp/<serial>/heartbeat    # IoT -> SGPMP (heartbeat)
 sgpmp/<serial>/status       # IoT -> SGPMP (ACK / cambio de estado)
 sgpmp/<serial>/command      # SGPMP -> IoT (comando)
 sgpmp/<serial>/resultado    # SGPMP -> IoT (resultado de cada ingesta, BRK-01)
+sgpmp/<serial>/vision       # IoT -> SGPMP (vector de visión, D4 -> backend)
+sgpmp/<serial>/evento       # IoT -> SGPMP (eventos Edge RF-55 -> backend)
+sgpmp/<serial>/ota/notify   # SGPMP -> IoT (aviso de OTA de modelos, D6)
+sgpmp/<serial>/ota/<evento> # IoT -> SGPMP (status, download_progress, integrity_ok,
+                            #   activated, rollback, critical_failure -> backend)
 ```
 
 El `serial` es el `serial` único de `modulo9.dispositivos_iot` (ej.
@@ -255,6 +260,22 @@ telemetría. Si el backend no responde, el evento queda en el log del broker.
   "timestamp_evento": "2026-10-17T10:00:00-05:00"
 }
 ```
+
+Visión, eventos Edge y reportes OTA (BRK-03, BRK-04, BRK-08 / D4-D6 de
+AIOT-DEV-03). El broker no los interpreta: los reenvía a un endpoint interno
+del backend con su token de servicio, en una tarea aparte del bucle MQTT. El
+`serial` es siempre el del topic (lo autenticó la ACL); si el cuerpo trae otro,
+se ignora.
+
+| Topic | Endpoint del backend | Cuerpo |
+|---|---|---|
+| `vision` | `POST /iot/telemetria/vision` | el sobre de D4 tal cual + `serial` |
+| `evento` | `POST /iot/eventos-edge` | el evento RF-55 tal cual + `serial` |
+| `ota/<evento>` | `POST /prediccion/ota/reportes` | `serial`, `id_despliegue_ota`, `componente`, `evento` y el resto en `detalle` |
+
+La ACL de cada nodo cubre esos topics de su serial; los reportes OTA van uno
+por uno (sin comodín), así que el nodo no puede publicar en `ota/notify` ni en
+un `ota/<evento>` fuera del contrato.
 
 Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
 Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el

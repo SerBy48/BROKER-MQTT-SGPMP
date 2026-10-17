@@ -4,13 +4,36 @@ from __future__ import annotations
 
 import json
 import logging
+from typing import NamedTuple
 
 from app.config import get_settings
 from app.core.errors import SgpmpError
 from app.mqtt import dynsec
-from app.services import ingest
+from app.services import ingest, reenvio_nodo
 
 logger = logging.getLogger(__name__)
+
+
+class TopicIot(NamedTuple):
+    serial: str
+    tipo: str
+    subtipo: str | None  # el `<evento>` de `ota/<evento>`; None en los demás
+
+
+def parsear_topic(topic: str) -> TopicIot | None:
+    """`<prefix>/<serial>/<tipo>[/<subtipo>]` (D5 de AIOT-DEV-03).
+
+    El serial va siempre después del prefijo: tomarlo del penúltimo segmento
+    (como antes) daba `ota` para `sgpmp/<serial>/ota/<evento>`.
+    """
+    prefijo = get_settings().mqtt_topic_prefix.split("/")
+    partes = topic.split("/")
+    if partes[: len(prefijo)] != prefijo:
+        return None
+    resto = partes[len(prefijo):]
+    if len(resto) not in (2, 3) or not all(resto):
+        return None
+    return TopicIot(resto[0], resto[1], resto[2] if len(resto) == 3 else None)
 
 
 async def handle_message(topic: str, payload: bytes) -> None:
@@ -19,29 +42,39 @@ async def handle_message(topic: str, payload: bytes) -> None:
         return
 
     settings = get_settings()
-    parts = topic.split("/")
-    if len(parts) < 3:
+    iot = parsear_topic(topic)
+    if iot is None:
         logger.warning("Topic MQTT no reconocido: %s", topic)
         return
-
-    msg_type = parts[-1]
-    serial = parts[-2]
 
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
         logger.error("Payload JSON inválido en topic %s", topic)
         return
+    if not isinstance(data, dict):
+        logger.error("Payload en %s no es un objeto JSON", topic)
+        return
 
-    logger.debug("Mensaje parseado: serial=%s tipo=%s payload=%s", serial, msg_type, data)
+    logger.debug("Mensaje parseado: %s payload=%s", iot, data)
+    serial, msg_type = iot.serial, iot.tipo
 
     try:
-        if msg_type == settings.mqtt_topic_telemetry:
+        if iot.subtipo is not None:
+            if msg_type == settings.mqtt_topic_ota:
+                reenvio_nodo.reporte_ota(serial, iot.subtipo, data)
+            else:
+                logger.warning("Tipo de mensaje desconocido en topic %s", topic)
+        elif msg_type == settings.mqtt_topic_telemetry:
             await ingest.ingest_telemetry(serial, data, topic=topic)
         elif msg_type == settings.mqtt_topic_heartbeat:
             await ingest.ingest_heartbeat(serial, data, topic=topic)
         elif msg_type == settings.mqtt_topic_status:
             await ingest.ingest_status(serial, data)
+        elif msg_type == settings.mqtt_topic_vision:
+            reenvio_nodo.vision(serial, data)
+        elif msg_type == settings.mqtt_topic_evento:
+            reenvio_nodo.evento_edge(serial, data)
         else:
             logger.warning("Tipo de mensaje desconocido en topic %s", topic)
     except SgpmpError as exc:

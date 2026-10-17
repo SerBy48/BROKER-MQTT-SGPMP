@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     # el firmware actual trata todo `command` sin tipo_comando como configuración
     # RF-23. Formato propuesto por Desarrollo; AIoT lo confirma en FW-01.
     mqtt_topic_resultado: str = "resultado"
+    # D4/D5/D6 de AIOT-DEV-03 (nodo -> broker -> endpoint interno del backend):
+    # vector de visión (BRK-03), eventos Edge de RF-55 (BRK-04) y OTA de modelos
+    # (BRK-08: `ota/notify` broker -> nodo, `ota/<evento>` nodo -> broker).
+    mqtt_topic_vision: str = "vision"
+    mqtt_topic_evento: str = "evento"
+    mqtt_topic_ota: str = "ota"
 
     # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
     # de responder NO_CONF.
@@ -80,6 +86,18 @@ class Settings(BaseSettings):
     @property
     def status_topic(self) -> str:
         return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_status}"
+
+    @property
+    def vision_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_vision}"
+
+    @property
+    def evento_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_evento}"
+
+    @property
+    def ota_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_ota}/+"
 
 
 @lru_cache
