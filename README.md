@@ -200,9 +200,17 @@ Heartbeat (`.../heartbeat`):
   "datos_pendientes_buffer": 0,
   "version_firmware": "1.0.0",
   "coordenadas": {"lat": 0, "lon": 0},
-  "reloj_sincronizado": true
+  "reloj_sincronizado": true,
+  "sensores_operativos": [{"sensor": "dht22", "operativo": true}],
+  "temperatura_dispositivo": 48.5
 }
 ```
+
+`sensores_operativos` y `temperatura_dispositivo` (°C) son de D11 (BRK-07),
+opcionales: `sensor` es el mismo identificador que viaja en el campo `sensor`
+de la telemetría. Se guardan en `modulo3.heartbeats.json_sensores_operativos` y
+`temperatura_dispositivo` cuando la migración DB-03 del backend está aplicada;
+antes de eso el broker los descarta y el heartbeat se guarda como siempre.
 
 ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo IoT):
 
@@ -210,6 +218,41 @@ ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo I
 {
   "tipo_mensaje": "ACK_CONFIGURACION",
   "resultado": "OK"
+}
+```
+
+Comandos de D7 (BRK-05, `.../command`, mismo patrón de RF-17). El backend llama
+`POST /v1/commands` con uno de estos `origen`; el broker publica con su
+`tipo_comando`, `id_comando` y `emitido_en`, y espera el ACK de su mismo tipo
+en `status` (`{"tipo_mensaje": "<ACK>", "resultado": "OK", "id_comando": ...}`).
+El contenido de `regla` y `configuracion` lo arma el backend desde su tabla y
+lo interpreta el firmware: el broker no lo valida por dentro.
+
+| `origen` | `tipo_comando` | ACK | Campos |
+|---|---|---|---|
+| `regla_compuesta` | `REGLA_COMPUESTA` | `ACK_REGLA` | `id_regla_alerta`, `version_regla`, `es_activa`, `regla` |
+| `config_motor` | `CONFIG_MOTOR_IA` | `ACK_CONFIG_MOTOR` (*) | `tipo_modelo`, `config_version`, `configuracion` |
+| `tipo_modelo` | `TIPO_MODELO_ASIGNADO` | `ACK_TIPO_MODELO` (*) | `id_infraestructura`, `tipo_modelo_asignado` |
+
+(*) Nombre propuesto por Desarrollo; AIoT lo confirma en su PR del firmware.
+`ACK_CONFIG_MOTOR` trae además el `config_version` que quedó activo en el nodo:
+la respuesta de `/v1/commands` lo devuelve en `config_version` para que el
+backend lo compare con el suyo (RF-65 E10).
+
+Aviso de buffer (`.../status`, BRK-06 / D10 de AIOT-DEV-03). El broker lo
+reenvía a `POST /iot/eventos-buffer` del backend con el `serial` del topic y su
+token de servicio (BRK-02); el backend crea la alerta técnica RF-60 y el evento
+RF-63. El reenvío corre aparte del bucle MQTT: un backend lento no frena la
+telemetría. Si el backend no responde, el evento queda en el log del broker.
+
+```json
+{
+  "tipo_mensaje": "EVENTO_BUFFER",
+  "evento": "BUFFER_OVERFLOW | BUFFER_DATA_CORRUPTION",
+  "porcentaje_ocupacion": 100.0,
+  "politica_aplicada": "POLITICA_RECHAZO",
+  "cantidad_datos_afectados": 12,
+  "timestamp_evento": "2026-10-17T10:00:00-05:00"
 }
 ```
 
