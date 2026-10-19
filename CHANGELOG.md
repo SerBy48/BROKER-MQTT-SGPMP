@@ -1,3 +1,14 @@
+## [0.4.0-rc.2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.1...v0.4.0-rc.2) (2026-10-19)
+
+### Features
+
+* **prod:** agregar .env.prod.example con el catalogo de variables de PROD ([af9da57](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/af9da57ab35d3e71af768a83c1f5ff39a5c70415))
+* **prod:** agregar docker-compose.prod.yml del broker AIoT ([55a8bd9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/55a8bd906a1ea1b41f337b30ec0fc66fac274ace))
+
+### Bug Fixes
+
+* **prod:** alinear el compose de PROD con develop: dynamic-security, TLS y backend (BRK-10) ([bb8fc19](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/bb8fc19dcbbd1942e5b930927d50e07f523210aa))
+
 ## [0.4.0-rc.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.3.0...v0.4.0-rc.1) (2026-10-19)
 
 ### Features
