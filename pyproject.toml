@@ -17,13 +17,14 @@ dependencies = [
     "asyncpg>=0.29",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
+    # BRK-02: cliente HTTP hacia sgpmp-backend (ya estaba en requirements.lock).
+    "httpx>=0.27",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
-    "httpx>=0.27",
     "ruff>=0.5",
 ]
 

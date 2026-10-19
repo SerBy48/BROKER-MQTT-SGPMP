@@ -41,6 +41,11 @@ class Settings(BaseSettings):
     mqtt_topic_heartbeat: str = "heartbeat"
     mqtt_topic_command: str = "command"
     mqtt_topic_status: str = "status"
+    # BRK-01 (D2 de AIOT-DEV-03): aviso al nodo del resultado de cada ingesta de
+    # telemetría, para que libere o retenga su buffer. Topic propio (broker -> nodo):
+    # el firmware actual trata todo `command` sin tipo_comando como configuración
+    # RF-23. Formato propuesto por Desarrollo; AIoT lo confirma en FW-01.
+    mqtt_topic_resultado: str = "resultado"
 
     # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
     # de responder NO_CONF.
@@ -52,6 +57,13 @@ class Settings(BaseSettings):
     # ignora siempre. Pasar a True cuando IoT confirme que ya lo devuelve: así
     # un ACK capturado y reenviado (o forjado sin id) deja de resolver comandos.
     mqtt_ack_requiere_id_comando: bool = False
+
+    # BRK-02 (P3 de AIOT-DEV-03): cliente HTTP broker -> sgpmp-backend para los
+    # eventos de control de bajo volumen (buffer, visión, eventos Edge, OTA). El
+    # token es el mismo BROKER_SERVICE_TOKEN del backend; va solo en el entorno.
+    backend_url: str = ""
+    broker_service_token: str = ""
+    backend_timeout_seconds: float = 10.0
 
     # API HTTPS (0.0.0.0 requerido dentro de contenedor Docker)
     api_host: str = "0.0.0.0"  # nosec B104

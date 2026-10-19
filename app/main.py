@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 
 from app.api.router import api_router
+from app.backend import client as backend_client
 from app.core.logging import setup_logging
 from app.mqtt.client import mqtt_gateway
 
@@ -29,6 +30,7 @@ async def lifespan(app: FastAPI):
     finally:
         logger.info("SGPMP deteniéndose")
         await mqtt_gateway.stop()
+        await backend_client.cerrar()
 
 
 app = FastAPI(
