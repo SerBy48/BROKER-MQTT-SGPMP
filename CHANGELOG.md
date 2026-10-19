@@ -1,3 +1,10 @@
+## [0.4.0-rc.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.3.0...v0.4.0-rc.1) (2026-10-19)
+
+### Features
+
+* **rf53:** cliente HTTP del broker hacia el backend con token de servicio (BRK-02) ([9ded469](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/9ded46944a545fc2838b5515d5dd9bf96c5b2281))
+* **rf53:** estado real de la ingesta en transmisiones_mqtt y aviso de resultado al nodo (BRK-01) ([4328c9e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/4328c9e59ab4b115c95099c2470154cfcfbfb5dc))
+
 ## [0.3.0](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.2.0...v0.3.0) (2026-10-12)
 
 ### Features
