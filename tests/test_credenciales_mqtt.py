@@ -121,6 +121,15 @@ async def test_emitir_al_edge_le_da_sus_topics_y_los_de_sus_dispositivos(falso, 
         # BRK-01: el resultado de cada ingesta, para liberar o retener el buffer
         ("subscribeLiteral", "sgpmp/ESP-2/resultado"),
         ("publishClientReceive", "sgpmp/ESP-2/resultado"),
+        # BRK-03/04: visión y eventos Edge
+        ("publishClientSend", "sgpmp/ESP-2/vision"),
+        ("publishClientSend", "sgpmp/ESP-2/evento"),
+        # BRK-08: recibe el aviso de OTA y publica solo los reportes del contrato
+        ("subscribeLiteral", "sgpmp/ESP-2/ota/notify"),
+        ("publishClientReceive", "sgpmp/ESP-2/ota/notify"),
+        *{("publishClientSend", f"sgpmp/ESP-2/ota/{e}") for e in (
+            "status", "download_progress", "integrity_ok", "activated", "rollback",
+            "critical_failure")},
     }
     topics = [a["topic"] for r in roles.values() for a in r["acls"]]
     assert not any("+" in t or "#" in t for t in topics)  # un rol abre solo SU serial
@@ -257,6 +266,7 @@ async def test_consultar_no_da_por_conectado_al_edge_que_aviso_desconexion(falso
 GATEWAY_ACLS = [
     {"acltype": "publishClientSend", "topic": "sgpmp/+/command", "allow": True},
     {"acltype": "publishClientSend", "topic": "sgpmp/+/resultado", "allow": True},
+    {"acltype": "publishClientSend", "topic": "sgpmp/+/ota/notify", "allow": True},
 ]
 GATEWAY = {"username": "sgpmp_gateway", "roles": [{"rolename": "admin"}, {"rolename": "gateway"}]}
 

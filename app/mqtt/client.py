@@ -67,9 +67,13 @@ class MqttGateway:
                     await client.subscribe(self.settings.telemetry_topic, qos=1)
                     await client.subscribe(self.settings.heartbeat_topic, qos=1)
                     await client.subscribe(self.settings.status_topic, qos=1)
+                    await client.subscribe(self.settings.vision_topic, qos=1)
+                    await client.subscribe(self.settings.evento_topic, qos=1)
+                    await client.subscribe(self.settings.ota_topic, qos=1)
                     await client.subscribe(TOPIC_RESPUESTA, qos=1)
                     logger.info(
-                        "MQTT conectado y suscrito a %s/{telemetry,heartbeat,status}",
+                        "MQTT conectado y suscrito a %s/+/{telemetry,heartbeat,status,"
+                        "vision,evento,ota/+}",
                         self.settings.mqtt_topic_prefix,
                     )
                     self._sync_task = asyncio.create_task(self._sincronizar_credenciales())

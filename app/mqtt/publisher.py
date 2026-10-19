@@ -36,3 +36,17 @@ async def publish_resultado_ingesta(serial: str, payload: dict, qos: int = 1) ->
     await mqtt_gateway.publish(topic, json.dumps(payload).encode("utf-8"), qos=qos)
     logger.debug("Resultado de ingesta publicado en %s: %s", topic, payload)
     return topic
+
+
+def ota_notify_topic(serial: str) -> str:
+    settings = get_settings()
+    return f"{settings.mqtt_topic_prefix}/{serial}/{settings.mqtt_topic_ota}/notify"
+
+
+async def publish_ota_notify(serial: str, payload: dict, qos: int = 1) -> str:
+    """Aviso de OTA de modelo al nodo (BRK-08). QoS 1: con la sesión persistente del
+    Edge, Mosquitto lo guarda si el nodo está desconectado y lo entrega al volver."""
+    topic = ota_notify_topic(serial)
+    await mqtt_gateway.publish(topic, json.dumps(payload).encode("utf-8"), qos=qos)
+    logger.info("Aviso de OTA publicado en %s", topic)
+    return topic

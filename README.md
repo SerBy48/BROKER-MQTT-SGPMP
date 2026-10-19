@@ -160,6 +160,11 @@ sgpmp/<serial>/heartbeat    # IoT -> SGPMP (heartbeat)
 sgpmp/<serial>/status       # IoT -> SGPMP (ACK / cambio de estado)
 sgpmp/<serial>/command      # SGPMP -> IoT (comando)
 sgpmp/<serial>/resultado    # SGPMP -> IoT (resultado de cada ingesta, BRK-01)
+sgpmp/<serial>/vision       # IoT -> SGPMP (vector de visión, D4 -> backend)
+sgpmp/<serial>/evento       # IoT -> SGPMP (eventos Edge RF-55 -> backend)
+sgpmp/<serial>/ota/notify   # SGPMP -> IoT (aviso de OTA de modelos, D6)
+sgpmp/<serial>/ota/<evento> # IoT -> SGPMP (status, download_progress, integrity_ok,
+                            #   activated, rollback, critical_failure -> backend)
 ```
 
 El `serial` es el `serial` único de `modulo9.dispositivos_iot` (ej.
@@ -256,6 +261,22 @@ telemetría. Si el backend no responde, el evento queda en el log del broker.
 }
 ```
 
+Visión, eventos Edge y reportes OTA (BRK-03, BRK-04, BRK-08 / D4-D6 de
+AIOT-DEV-03). El broker no los interpreta: los reenvía a un endpoint interno
+del backend con su token de servicio, en una tarea aparte del bucle MQTT. El
+`serial` es siempre el del topic (lo autenticó la ACL); si el cuerpo trae otro,
+se ignora.
+
+| Topic | Endpoint del backend | Cuerpo |
+|---|---|---|
+| `vision` | `POST /iot/telemetria/vision` | el sobre de D4 tal cual + `serial` |
+| `evento` | `POST /iot/eventos-edge` | el evento RF-55 tal cual + `serial` |
+| `ota/<evento>` | `POST /prediccion/ota/reportes` | `serial`, `id_despliegue_ota`, `componente`, `evento` y el resto en `detalle` |
+
+La ACL de cada nodo cubre esos topics de su serial; los reportes OTA van uno
+por uno (sin comodín), así que el nodo no puede publicar en `ota/notify` ni en
+un `ota/<evento>` fuera del contrato.
+
 Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
 Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
 broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y
@@ -306,6 +327,7 @@ inverso, fuera de alcance de RF-23 en su primera entrega).
 | `GET` | `/v1/healthz` | Salud del servicio | — |
 | `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) o un umbral a un Gateway Edge (RF-17) | Bearer |
 | `GET` | `/v1/devices` | Estado de dispositivos IoT | Bearer |
+| `POST` | `/v1/ota/notify` | Aviso de OTA de modelo a un nodo (BRK-08); `202` al publicar, `503` sin MQTT | Bearer |
 
 `POST /v1/commands` es síncrono: si el dispositivo está `ACTIVO`
 (`modulo3.estados_dispositivos_iot`), publica el comando y espera hasta
@@ -321,6 +343,29 @@ curl -X POST http://localhost:8000/v1/commands \
   -H "Authorization: Bearer <TOKEN_DE_SERVICIO>" \
   -H "Content-Type: application/json" \
   -d '{"origen": "configuracion", "serial": "IOT-EST01-HLA-001", "frecuencia_captura": 60, "intervalo_transmision": 300}'
+```
+
+`POST /v1/ota/notify` (BRK-08, D6 paso 3) no espera la instalación: publica en
+`sgpmp/<serial>/ota/notify` (QoS 1; con la sesión persistente del Edge,
+Mosquitto lo entrega al reconectar) y responde `202` con el `id_mensaje` del
+aviso. El nodo reporta el avance por `ota/<evento>`, que el broker reenvía a
+`POST /prediccion/ota/reportes`. `parametros` (fragmento, reintentos, batería
+mínima, ventana) viaja tal cual desde el backend. Contrato propuesto por
+Desarrollo hasta que DEV-15 fije el suyo:
+
+```json
+{
+  "serial": "EDGE-REMANSO-01",
+  "id_despliegue_ota": 31,
+  "tipo_modelo": "AVES",
+  "componente": "DETECTOR",
+  "version": "3.0.0",
+  "url_descarga": "https://.../prediccion/ota/artefactos/31?firma=...&expira=...",
+  "sha256": "<64 hex en minúsculas>",
+  "firma": "<firma del artefacto>",
+  "tamano_bytes": 1048576,
+  "parametros": {"tamano_fragmento_bytes": 65536, "max_reintentos_descarga": 5}
+}
 ```
 
 Respuestas posibles (siempre `200` si el request es válido — el resultado
