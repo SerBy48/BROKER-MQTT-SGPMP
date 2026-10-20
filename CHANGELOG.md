@@ -1,3 +1,13 @@
+## [0.4.0-rc.3](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.2...v0.4.0-rc.3) (2026-10-20)
+
+### Features
+
+* **rf53:** topicos vision, evento y ota del nodo con su ACL y reenvio al backend (BRK-03, BRK-04, BRK-08) ([a90cda6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a90cda6aa5691e6bcd2903c89ed5336f4eb32d83))
+* **rf54:** reenviar EVENTO_BUFFER del status al backend (BRK-06) ([320f93e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/320f93e5b261ced3cc5d0ce479eb453ea4b79f5e))
+* **rf55:** comandos REGLA_COMPUESTA, CONFIG_MOTOR_IA y TIPO_MODELO_ASIGNADO hacia el nodo (BRK-05) ([464c05b](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/464c05b3aaf1941417e5943ab8d3a246ff9c0c7e))
+* **rf60:** heartbeat con sensores_operativos y temperatura_dispositivo (BRK-07) ([b769fde](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b769fdea81b49c0ca06523820e7e4ccb133cc808))
+* **rf70:** endpoint para que el backend pida el aviso de OTA a un nodo (BRK-08) ([a7e563c](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a7e563c42908c289becfbe970275f8d5c69ed71e))
+
 ## [0.4.0-rc.2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.1...v0.4.0-rc.2) (2026-10-19)
 
 ### Features
