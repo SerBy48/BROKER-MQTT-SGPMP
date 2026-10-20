@@ -1,3 +1,9 @@
+## [0.4.0-rc.4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.3...v0.4.0-rc.4) (2026-10-20)
+
+### Features
+
+* **rf53:** cola de prioridad y definicion de dato critico bajo saturacion (BRK-09) ([412ae28](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/412ae28d2491d28aafcd5a411ec4d8a2063a06bb))
+
 ## [0.4.0-rc.3](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.2...v0.4.0-rc.3) (2026-10-20)
 
 ### Features
