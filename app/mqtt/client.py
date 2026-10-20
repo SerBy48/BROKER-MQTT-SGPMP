@@ -50,8 +50,11 @@ class MqttGateway:
             logger.exception("No se pudo sincronizar dynamic-security al conectar")
 
     async def run(self) -> None:
+        from app.mqtt.cola import cola_ingesta
         from app.mqtt.dynsec import TOPIC_RESPUESTA
-        from app.mqtt.handlers import handle_message
+
+        # BRK-09: el bucle solo parsea y encola por prioridad; los workers procesan.
+        cola_ingesta.iniciar()
 
         logger.debug(
             "Intentando conectar MQTT a %s:%s (client_id=%s, tls=%s)",
@@ -84,7 +87,7 @@ class MqttGateway:
                             topic,
                             len(message.payload),
                         )
-                        await handle_message(topic, message.payload)
+                        await cola_ingesta.recibir(topic, message.payload)
             except aiomqtt.MqttError as exc:
                 self._client = None
                 logger.error(
@@ -111,6 +114,9 @@ class MqttGateway:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        from app.mqtt.cola import cola_ingesta
+
+        await cola_ingesta.detener()
 
 
 mqtt_gateway = MqttGateway(get_settings())

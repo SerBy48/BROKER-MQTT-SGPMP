@@ -277,6 +277,14 @@ La ACL de cada nodo cubre esos topics de su serial; los reportes OTA van uno
 por uno (sin comodín), así que el nodo no puede publicar en `ota/notify` ni en
 un `ota/<evento>` fuera del contrato.
 
+Prioridad bajo saturación (BRK-09, RF-53 E15). Los mensajes pasan por una cola
+de prioridad: control (`status`, `ota/*`) antes que críticos (heartbeat, eventos
+Edge, lecturas con `"nivel_umbral": "critico"` o de una variable marcada
+`es_critica` en M09) antes que el resto. Si el gateway se satura, las lecturas
+normales reciben `RETENER` / `ERROR_SATURACION` y el Edge las reintenta. La
+definición completa de "dato crítico" y la configuración están en
+[`docs/BRK-09_Cola_Priorizacion_Saturacion.md`](./docs/BRK-09_Cola_Priorizacion_Saturacion.md).
+
 Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
 Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
 broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y
@@ -291,7 +299,7 @@ lo deja también en `transmisiones_mqtt.estado`:
   "timestamp_captura": "2026-08-17T14:00:00Z",
   "resultado": "EXITO | FALLIDO | TIMEOUT",
   "accion_buffer": "LIBERAR | RETENER",
-  "codigo": "LECTURA_VALIDA | FUERA_DE_RANGO | ERROR_CALIBRACION | ERROR_* | ERROR_PERSISTENCIA",
+  "codigo": "LECTURA_VALIDA | FUERA_DE_RANGO | ERROR_CALIBRACION | ERROR_* | ERROR_PERSISTENCIA | ERROR_SATURACION",
   "mensaje": "ERROR_TIEMPO: timestamp_captura futuro.",
   "id_telemetria": 123
 }

@@ -36,29 +36,28 @@ def parsear_topic(topic: str) -> TopicIot | None:
     return TopicIot(resto[0], resto[1], resto[2] if len(resto) == 3 else None)
 
 
-async def handle_message(topic: str, payload: bytes) -> None:
-    if topic == dynsec.TOPIC_RESPUESTA:
-        dynsec.resolver_respuesta(payload)
-        return
-
-    settings = get_settings()
+def parsear_mensaje(topic: str, payload: bytes) -> tuple[TopicIot, dict] | None:
+    """Topic y cuerpo JSON de un mensaje del nodo; None (y log) si no son válidos."""
     iot = parsear_topic(topic)
     if iot is None:
         logger.warning("Topic MQTT no reconocido: %s", topic)
-        return
-
+        return None
     try:
         data = json.loads(payload)
     except json.JSONDecodeError:
         logger.error("Payload JSON inválido en topic %s", topic)
-        return
+        return None
     if not isinstance(data, dict):
         logger.error("Payload en %s no es un objeto JSON", topic)
-        return
-
+        return None
     logger.debug("Mensaje parseado: %s payload=%s", iot, data)
-    serial, msg_type = iot.serial, iot.tipo
+    return iot, data
 
+
+async def procesar(iot: TopicIot, data: dict, topic: str) -> None:
+    """Despacha un mensaje ya parseado a su servicio."""
+    settings = get_settings()
+    serial, msg_type = iot.serial, iot.tipo
     try:
         if iot.subtipo is not None:
             if msg_type == settings.mqtt_topic_ota:
@@ -81,3 +80,13 @@ async def handle_message(topic: str, payload: bytes) -> None:
         logger.error("Error de dominio procesando mensaje en %s: %s", topic, exc)
     except Exception:
         logger.exception("Error inesperado procesando mensaje en %s", topic)
+
+
+async def handle_message(topic: str, payload: bytes) -> None:
+    """Procesa un mensaje en el acto, sin pasar por la cola de BRK-09."""
+    if topic == dynsec.TOPIC_RESPUESTA:
+        dynsec.resolver_respuesta(payload)
+        return
+    mensaje = parsear_mensaje(topic, payload)
+    if mensaje is not None:
+        await procesar(*mensaje, topic)

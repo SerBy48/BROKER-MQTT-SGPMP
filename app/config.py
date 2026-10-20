@@ -64,6 +64,13 @@ class Settings(BaseSettings):
     # un ACK capturado y reenviado (o forjado sin id) deja de resolver comandos.
     mqtt_ack_requiere_id_comando: bool = False
 
+    # BRK-09 (RF-53 E15): cola de prioridad entre el bucle MQTT y el procesamiento.
+    # Con `capacidad` mensajes en espera se rechazan los NORMAL; con el doble, también
+    # los CRITICO; los de CONTROL nunca. `workers` procesan en paralelo (acotado por el
+    # pool de la BD: 5 + 10 de desborde por defecto en SQLAlchemy).
+    mqtt_cola_capacidad: int = 1000
+    mqtt_cola_workers: int = 4
+
     # BRK-02 (P3 de AIOT-DEV-03): cliente HTTP broker -> sgpmp-backend para los
     # eventos de control de bajo volumen (buffer, visión, eventos Edge, OTA). El
     # token es el mismo BROKER_SERVICE_TOKEN del backend; va solo en el entorno.

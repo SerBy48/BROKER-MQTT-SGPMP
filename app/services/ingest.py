@@ -174,6 +174,19 @@ async def _avisar_nodo(serial: str, data: dict, resultado: ResultadoIngesta) -> 
         logger.warning("MQTT no conectado: no se avisó a %s el resultado de su ingesta.", serial)
 
 
+async def rechazar_por_saturacion(serial: str, data: dict) -> None:
+    """BRK-09: lectura que no entró a la cola. No se toca la BD (probablemente es la
+    causa de la saturación): solo se le pide al nodo que la retenga y reintente."""
+    await _avisar_nodo(
+        serial,
+        data,
+        ResultadoIngesta(
+            "PENDIENTE", RETENER, "ERROR_SATURACION",
+            "ERROR_SATURACION: el gateway está saturado; reintentar con backoff.",
+        ),
+    )
+
+
 async def ingest_telemetry(serial: str, data: dict, topic: str | None = None) -> ResultadoIngesta:
     """Persiste una lectura por fn_ingesta_telemetria y avisa el resultado real al nodo.
 
