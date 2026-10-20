@@ -16,6 +16,7 @@ from app.db.repositories import registry
 from app.db.repositories import telemetry as telemetry_repo
 from app.mqtt import correlacion, presencia, publisher
 from app.schemas import HeartbeatPayload, TelemetryPayload
+from app.services import reenvio
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +35,17 @@ _RECHAZOS_DEFINITIVOS = frozenset({
 LIBERAR = "LIBERAR"
 RETENER = "RETENER"
 TIPO_RESULTADO_INGESTA = "RESULTADO_INGESTA"
+
+# BRK-06 (D10 de AIOT-DEV-03): aviso de buffer del Edge por `status`.
+TIPO_EVENTO_BUFFER = "EVENTO_BUFFER"
+RUTA_EVENTOS_BUFFER = "/iot/eventos-buffer"
+_CAMPOS_EVENTO_BUFFER = (
+    "evento",
+    "porcentaje_ocupacion",
+    "politica_aplicada",
+    "cantidad_datos_afectados",
+    "timestamp_evento",
+)
 
 
 @dataclass(frozen=True)
@@ -225,7 +237,13 @@ async def ingest_heartbeat(serial: str, data: dict, topic: str | None = None) ->
         return heartbeat_id
 
 
-_TIPOS_ACK = {correlacion.ACK_CONFIGURACION, correlacion.ACK_UMBRAL}
+_TIPOS_ACK = {
+    correlacion.ACK_CONFIGURACION,
+    correlacion.ACK_UMBRAL,
+    correlacion.ACK_REGLA,  # BRK-05
+    correlacion.ACK_CONFIG_MOTOR,  # BRK-05: trae config_version
+    correlacion.ACK_TIPO_MODELO,  # BRK-05
+}
 
 
 async def ingest_status(serial: str, data: dict) -> None:
@@ -237,7 +255,10 @@ async def ingest_status(serial: str, data: dict) -> None:
     El `id_comando` es el que llegó en el comando; solo un ACK que lo devuelva
     resuelve la espera (TC-M09-252, anti-replay). El ACK de un umbral (RF-17)
     es igual con ``"tipo_mensaje": "ACK_UMBRAL"``; cada tipo solo resuelve
-    comandos de su mismo tipo.
+    comandos de su mismo tipo. Los de BRK-05 (``ACK_REGLA``, ``ACK_CONFIG_MOTOR``
+    y ``ACK_TIPO_MODELO``) siguen el mismo formato; ``ACK_CONFIG_MOTOR`` agrega
+    el ``config_version`` que quedó activo en el nodo, que /v1/commands
+    devuelve al backend.
 
     Si hay una espera de comando pendiente para este `serial`
     (dispatch_command la crea al publicar), se resuelve acá -- eso es lo que
@@ -253,12 +274,20 @@ async def ingest_status(serial: str, data: dict) -> None:
         # por él quedan PENDIENTE al instante en vez de esperar el ACK.
         presencia.marcar_desconectado(serial)
         return
+    if tipo_mensaje == TIPO_EVENTO_BUFFER:
+        # El backend lo convierte en alerta técnica RF-60 + evento RF-63 (DEV-11) y
+        # valida el sobre: aquí solo se le agrega el serial del topic, que ya
+        # autenticó la ACL de MQTT.
+        cuerpo = {"serial": serial, **{c: data.get(c) for c in _CAMPOS_EVENTO_BUFFER}}
+        reenvio.reenviar(RUTA_EVENTOS_BUFFER, cuerpo, f"{TIPO_EVENTO_BUFFER} de {serial}")
+        return
     if tipo_mensaje in _TIPOS_ACK and data.get("resultado") == "OK":
         resuelto = correlacion.resolver_ack(
             serial,
             data.get("id_comando"),
             tipo_ack=tipo_mensaje,
             exigir_id=get_settings().mqtt_ack_requiere_id_comando,
+            datos=data,
         )
         if not resuelto:
             logger.info(
