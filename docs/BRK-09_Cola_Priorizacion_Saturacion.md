@@ -9,6 +9,31 @@
 
 ---
 
+## 0. Actualización BRK-11 (RFC-016 v1.2, 2026-10-20)
+
+RFC-016 v1.2 aprobó esta cola con tres correcciones, ya aplicadas en `app/services/prioridad.py`. Las secciones de abajo quedan como contexto de BRK-09; donde difieren, rige esta.
+
+**Orden de salida.** Cada mensaje lleva una clave determinista y sale primero la menor:
+
+| # | Factor | Valores, de primero a último |
+|---|---|---|
+| 0 | Control | `status` y `ota/*` antes que todo (P-6: propuesta de Desarrollo, un ACK perdido desincroniza nodo y backend) |
+| 1 | Severidad (A.3, binaria) | crítica → resto |
+| 2 | `nivel_criticidad` del área (A.1, RF-20) | ALTA → MEDIA → BAJA (sin dato: MEDIA) |
+| 3 | Tipo de dato | evento Edge (RF-55) → heartbeat (B.6) → telemetría escalar o visión |
+| 4 | Origen (A.2) | `TIEMPO_REAL` → `BUFFER_LOCAL` |
+| 5 | Antigüedad | `timestamp_captura` más viejo primero; empate por serial |
+
+**Severidad (A.3).** La calcula el broker: una lectura es crítica si su `valor_crudo` cae en la banda del nivel `critico` de RF-17 de **alguna** especie del área (el umbral más restrictivo de RFC-012) o si su variable es `es_critica`. El `nivel_umbral` del Edge solo se usa cuando el broker no tiene umbral para esa área y variable. Hoy el Edge no lo envía.
+
+**Área.** La visión trae `area_id`; el resto usa el área del dispositivo emisor (`dispositivos_iot.id_infraestructura`), la misma que usa `fn_ingesta_telemetria` para elegir el umbral.
+
+**Admisión (sin cambio).** CONTROL nunca se rechaza; CRITICO (dato crítico, heartbeat o evento Edge) a partir de 2 × capacidad; NORMAL a partir de la capacidad; el rechazo de una lectura devuelve `RETENER`.
+
+**Lectura de M09.** Área por dispositivo, criticidad por área y bandas críticas por (área, variable) se leen en bloque con el catálogo de `es_critica`, en la misma caché de 10 min. Con la BD anterior a DB-06/DB-07 sigue funcionando: todas las áreas son MEDIA y la especie sale de `infraestructuras.id_especie`.
+
+**Aviso a AIoT.** `nivel_umbral` deja de decidir la prioridad cuando el broker conoce el umbral: es solo una pista.
+
 ## 1. Qué es un dato crítico
 
 Un mensaje del nodo cae en una de tres prioridades. La regla usa solo datos que el broker ya tiene: el tipo de topic, lo que el Edge calcula con sus umbrales y una marca del catálogo que edita el Administrador. Ninguna lista de variables queda fija en el código.

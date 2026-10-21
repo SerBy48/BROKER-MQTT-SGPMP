@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-10-20 | Arekkazu | BRK-11 RFC-016: contexto de prioridad (área, criticidad, bandas críticas de RF-17) |
 """Acceso al registro/catálogo IoT (schema modulo9, solo lectura)."""
 
 from __future__ import annotations
@@ -77,6 +80,66 @@ async def variables_criticas(session: AsyncSession) -> set[str]:
         text("SELECT nombre FROM modulo9.variables_ambientales WHERE es_critica = true")
     )
     return {nombre for (nombre,) in result}
+
+
+async def _existe_columna(session: AsyncSession, tabla: str, columna: str) -> bool:
+    result = await session.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'modulo9' AND table_name = :t AND column_name = :c"
+        ),
+        {"t": tabla, "c": columna},
+    )
+    return result.first() is not None
+
+
+class ContextoPrioridad(NamedTuple):
+    """Lo que la cola de RFC-016 necesita de M09 para ordenar sin consultar por mensaje."""
+    area_por_serial: dict[str, int]                                    # dispositivo -> área
+    criticidad_por_area: dict[int, str]                                # ALTA / MEDIA / BAJA
+    bandas_criticas: dict[tuple[int, str], list[tuple[float, float]]]  # (área, variable) -> nivel critico
+
+
+async def contexto_prioridad(session: AsyncSession) -> ContextoPrioridad:
+    """Área de cada dispositivo, `nivel_criticidad` de cada área (RF-20) y las bandas del
+    nivel `critico` de RF-17 de todas las especies presentes en cada área (RFC-012).
+
+    Tolera la BD anterior a DB-06/DB-07: sin `nivel_criticidad` todas las áreas son
+    `MEDIA`, y sin `infraestructuras_especies` la especie sale de `infraestructuras.id_especie`.
+    """
+    area_por_serial = {
+        serial: area
+        for serial, area in await session.execute(
+            text("SELECT serial, id_infraestructura FROM modulo9.dispositivos_iot "
+                 "WHERE id_infraestructura IS NOT NULL")
+        )
+    }
+    criticidad_por_area: dict[int, str] = {}
+    if await _existe_columna(session, "infraestructuras", "nivel_criticidad"):
+        criticidad_por_area = dict(
+            (await session.execute(
+                text("SELECT id_infraestructura, nivel_criticidad FROM modulo9.infraestructuras")
+            )).all()
+        )
+    if await _existe_columna(session, "infraestructuras_especies", "id_especie"):
+        especies_area = "SELECT id_infraestructura, id_especie FROM modulo9.infraestructuras_especies"
+    else:
+        especies_area = ("SELECT id_infraestructura, id_especie FROM modulo9.infraestructuras "
+                         "WHERE id_especie IS NOT NULL")
+    bandas: dict[tuple[int, str], list[tuple[float, float]]] = {}
+    result = await session.execute(
+        text(
+            f"SELECT ae.id_infraestructura, va.nombre, n.limite_inferior, n.limite_superior "
+            f"FROM ({especies_area}) ae "
+            "JOIN modulo9.umbrales_ambientales u ON u.id_especie = ae.id_especie AND u.es_activo "
+            "JOIN modulo9.variables_ambientales va ON va.id_variable_ambiental = u.id_variable_ambiental "
+            "JOIN modulo9.niveles_alerta_ambientales n "
+            "  ON n.id_umbral_ambiental = u.id_umbral_ambiental AND n.nivel::text = 'critico'"
+        )
+    )
+    for area, variable, inferior, superior in result:
+        bandas.setdefault((area, variable), []).append((float(inferior), float(superior)))
+    return ContextoPrioridad(area_por_serial, criticidad_por_area, bandas)
 
 
 async def resolve_sensor_id(
