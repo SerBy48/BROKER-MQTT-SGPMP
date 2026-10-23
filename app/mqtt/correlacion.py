@@ -13,8 +13,10 @@ mismo Gateway Edge recibe varios comandos seguidos (uno por variable de la
 especie, o uno cruzado con una configuración RF-23) y la segunda espera pisaba
 a la primera, que terminaba en NO_CONF aunque el Edge sí hubiera confirmado.
 
-Cada espera recuerda además qué `tipo_ack` espera ("ACK_CONFIGURACION" o
-"ACK_UMBRAL"): un ACK de un tipo nunca resuelve un comando del otro.
+Cada espera recuerda además qué `tipo_ack` espera ("ACK_CONFIGURACION",
+"ACK_UMBRAL" o uno de los de BRK-05): un ACK de un tipo nunca resuelve un
+comando de otro. La espera se resuelve con el cuerpo del ACK, porque algunos
+devuelven datos al backend (el `config_version` de ACK_CONFIG_MOTOR).
 
 ponytail: dict en memoria de un solo proceso -- si el broker corre en
 múltiples réplicas sin sticky routing, la correlación se rompe. Solución
@@ -31,12 +33,17 @@ logger = logging.getLogger(__name__)
 
 ACK_CONFIGURACION = "ACK_CONFIGURACION"
 ACK_UMBRAL = "ACK_UMBRAL"
+# BRK-05 (D7 de AIOT-DEV-03). ACK_CONFIG_MOTOR y ACK_TIPO_MODELO son los nombres
+# propuestos por Desarrollo; AIoT los confirma en su PR del firmware.
+ACK_REGLA = "ACK_REGLA"
+ACK_CONFIG_MOTOR = "ACK_CONFIG_MOTOR"
+ACK_TIPO_MODELO = "ACK_TIPO_MODELO"
 
 
 @dataclass
 class _Espera:
     tipo_ack: str
-    future: asyncio.Future[None]
+    future: asyncio.Future[dict | None]
 
 
 # serial -> id_comando -> espera
@@ -45,8 +52,8 @@ _pending_acks: dict[str, dict[str, _Espera]] = {}
 
 def crear_espera(
     serial: str, id_comando: str, tipo_ack: str = ACK_CONFIGURACION
-) -> asyncio.Future[None]:
-    future: asyncio.Future[None] = asyncio.get_running_loop().create_future()
+) -> asyncio.Future[dict | None]:
+    future: asyncio.Future[dict | None] = asyncio.get_running_loop().create_future()
     _pending_acks.setdefault(serial, {})[id_comando] = _Espera(tipo_ack=tipo_ack, future=future)
     logger.debug(
         "Espera de ACK creada para %s (id_comando=%s, tipo=%s)", serial, id_comando, tipo_ack
@@ -60,6 +67,7 @@ def resolver_ack(
     *,
     tipo_ack: str = ACK_CONFIGURACION,
     exigir_id: bool = False,
+    datos: dict | None = None,
 ) -> bool:
     """Resuelve la espera del comando de `serial` al que corresponde este ACK.
 
@@ -111,7 +119,7 @@ def resolver_ack(
             )
             return False
 
-    espera.future.set_result(None)
+    espera.future.set_result(datos)
     logger.debug("ACK de %s resuelto", serial)
     return True
 

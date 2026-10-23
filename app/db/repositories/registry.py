@@ -57,6 +57,28 @@ async def resolve_variable_id(session: AsyncSession, nombre: str) -> int | None:
     return row[0] if row else None
 
 
+async def variables_criticas(session: AsyncSession) -> set[str]:
+    """Nombres de las variables marcadas críticas en el catálogo de M09 (BRK-09).
+
+    La marca vive en `modulo9.variables_ambientales.es_critica`, que agrega la
+    migración del DBA. Mientras la columna no exista, ninguna variable es crítica
+    por catálogo (conjunto vacío) y la prioridad sale del resto de las reglas.
+    """
+    existe = await session.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'modulo9' AND table_name = 'variables_ambientales' "
+            "AND column_name = 'es_critica'"
+        )
+    )
+    if existe.first() is None:
+        return set()
+    result = await session.execute(
+        text("SELECT nombre FROM modulo9.variables_ambientales WHERE es_critica = true")
+    )
+    return {nombre for (nombre,) in result}
+
+
 async def resolve_sensor_id(
     session: AsyncSession,
     device_id: int,

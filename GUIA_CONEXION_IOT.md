@@ -70,6 +70,12 @@ sgpmp/<serial>/telemetry    # IoT -> SGPMP (telemetría)
 sgpmp/<serial>/heartbeat    # IoT -> SGPMP (heartbeat)
 sgpmp/<serial>/status       # IoT -> SGPMP (ACK / cambio de estado)
 sgpmp/<serial>/command      # SGPMP -> IoT (comando)
+sgpmp/<serial>/resultado    # SGPMP -> IoT (resultado de cada ingesta, BRK-01)
+sgpmp/<serial>/vision       # IoT -> SGPMP (vector de visión, D4 -> backend)
+sgpmp/<serial>/evento       # IoT -> SGPMP (eventos Edge RF-55 -> backend)
+sgpmp/<serial>/ota/notify   # SGPMP -> IoT (aviso de OTA de modelos, D6)
+sgpmp/<serial>/ota/<evento> # IoT -> SGPMP (status, download_progress, integrity_ok,
+                            #   activated, rollback, critical_failure -> backend)
 ```
 
 El `<serial>` debe coincidir exactamente con el registrado en el sistema
@@ -79,6 +85,11 @@ para ese dispositivo (ej. `IOT-EST01-HLA-001`, tabla
 Los contratos de payload completos (telemetría, heartbeat, comando, ACK)
 están en `INTEGRACION_DISPOSITIVOS_RF23.md` y en el `README.md` de este
 repo — no se repiten acá para no tener dos fuentes de verdad desincronizadas.
+
+**Novedad (BRK-01):** `sgpmp/<serial>/resultado` trae, por cada lectura, si
+quedó persistida y si el Edge debe liberarla o retenerla en su buffer
+(`accion_buffer`). El formato está en el `README.md` (propuesto, FW-01). La
+credencial del Edge ya incluye la suscripción a ese topic.
 
 **Novedad (TC-M09-252):** el comando trae `id_comando` y `emitido_en`, y el
 dispositivo debe devolver `id_comando` en el ACK y no re-aplicar un comando ya

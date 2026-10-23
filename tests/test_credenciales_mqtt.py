@@ -118,6 +118,18 @@ async def test_emitir_al_edge_le_da_sus_topics_y_los_de_sus_dispositivos(falso, 
         ("publishClientSend", "sgpmp/ESP-2/status"),
         ("subscribeLiteral", "sgpmp/ESP-2/command"),
         ("publishClientReceive", "sgpmp/ESP-2/command"),
+        # BRK-01: el resultado de cada ingesta, para liberar o retener el buffer
+        ("subscribeLiteral", "sgpmp/ESP-2/resultado"),
+        ("publishClientReceive", "sgpmp/ESP-2/resultado"),
+        # BRK-03/04: visión y eventos Edge
+        ("publishClientSend", "sgpmp/ESP-2/vision"),
+        ("publishClientSend", "sgpmp/ESP-2/evento"),
+        # BRK-08: recibe el aviso de OTA y publica solo los reportes del contrato
+        ("subscribeLiteral", "sgpmp/ESP-2/ota/notify"),
+        ("publishClientReceive", "sgpmp/ESP-2/ota/notify"),
+        *{("publishClientSend", f"sgpmp/ESP-2/ota/{e}") for e in (
+            "status", "download_progress", "integrity_ok", "activated", "rollback",
+            "critical_failure")},
     }
     topics = [a["topic"] for r in roles.values() for a in r["acls"]]
     assert not any("+" in t or "#" in t for t in topics)  # un rol abre solo SU serial
@@ -251,7 +263,11 @@ async def test_consultar_no_da_por_conectado_al_edge_que_aviso_desconexion(falso
 
 # ── Sincronización al conectar (reconciliación con modulo9) ─────────────────
 
-GATEWAY_ACLS = [{"acltype": "publishClientSend", "topic": "sgpmp/+/command", "allow": True}]
+GATEWAY_ACLS = [
+    {"acltype": "publishClientSend", "topic": "sgpmp/+/command", "allow": True},
+    {"acltype": "publishClientSend", "topic": "sgpmp/+/resultado", "allow": True},
+    {"acltype": "publishClientSend", "topic": "sgpmp/+/ota/notify", "allow": True},
+]
 GATEWAY = {"username": "sgpmp_gateway", "roles": [{"rolename": "admin"}, {"rolename": "gateway"}]}
 
 
@@ -274,8 +290,13 @@ def _legacy(monkeypatch) -> list[dict]:
     return cm._acls_dispositivo(get_settings(), "+", "subscribePattern")
 
 
+def _rol_serial(nombre: str) -> dict:
+    acls = cm._rol_de_serial(get_settings(), nombre.removeprefix("serial-"))["acls"]
+    return _rol(nombre, acls)
+
+
 def _base(*roles_serial: str) -> list[dict]:
-    return [_rol("admin"), _rol("gateway", GATEWAY_ACLS), *(_rol(r) for r in roles_serial)]
+    return [_rol("admin"), _rol("gateway", GATEWAY_ACLS), *(_rol_serial(r) for r in roles_serial)]
 
 
 async def test_primer_arranque_el_gateway_se_asigna_su_rol_y_espera_la_reconexion(falso) -> None:
@@ -385,6 +406,26 @@ async def test_un_rol_con_acls_distintas_se_corrige(falso) -> None:
     assert falso.de("modifyRole") == [
         {"command": "modifyRole", "rolename": "gateway", "acls": GATEWAY_ACLS}
     ]
+
+
+async def test_un_rol_de_serial_emitido_antes_de_un_topic_nuevo_se_actualiza(falso) -> None:
+    """BRK-01 agrega `resultado`: los roles ya emitidos tienen que recibirlo sin rotar
+    la clave del Edge; los que ya están al día no se tocan (modifyRole desconecta)."""
+    viejo = _rol("serial-ESP-1", [a for a in _rol_serial("serial-ESP-1")["acls"]
+                                  if not a["topic"].endswith("/resultado")])
+    falso.datos = _estado(
+        [GATEWAY, _edge("EDGE-1", "ESP-1", "ESP-2")],
+        [*_base("serial-EDGE-1", "serial-ESP-2"), viejo],
+    )
+
+    await cm.sincronizar()
+
+    (modificado,) = falso.de("modifyRole")
+    assert modificado["rolename"] == "serial-ESP-1"
+    assert ("subscribeLiteral", "sgpmp/ESP-1/resultado") in {
+        (a["acltype"], a["topic"]) for a in modificado["acls"]
+    }
+    assert falso.de("modifyClient") == [] and falso.de("setClientPassword") == []
 
 
 # ── Cliente de $CONTROL ──────────────────────────────────────────────────────

@@ -159,6 +159,12 @@ sgpmp/<serial>/telemetry    # IoT -> SGPMP (telemetría)
 sgpmp/<serial>/heartbeat    # IoT -> SGPMP (heartbeat)
 sgpmp/<serial>/status       # IoT -> SGPMP (ACK / cambio de estado)
 sgpmp/<serial>/command      # SGPMP -> IoT (comando)
+sgpmp/<serial>/resultado    # SGPMP -> IoT (resultado de cada ingesta, BRK-01)
+sgpmp/<serial>/vision       # IoT -> SGPMP (vector de visión, D4 -> backend)
+sgpmp/<serial>/evento       # IoT -> SGPMP (eventos Edge RF-55 -> backend)
+sgpmp/<serial>/ota/notify   # SGPMP -> IoT (aviso de OTA de modelos, D6)
+sgpmp/<serial>/ota/<evento> # IoT -> SGPMP (status, download_progress, integrity_ok,
+                            #   activated, rollback, critical_failure -> backend)
 ```
 
 El `serial` es el `serial` único de `modulo9.dispositivos_iot` (ej.
@@ -199,9 +205,17 @@ Heartbeat (`.../heartbeat`):
   "datos_pendientes_buffer": 0,
   "version_firmware": "1.0.0",
   "coordenadas": {"lat": 0, "lon": 0},
-  "reloj_sincronizado": true
+  "reloj_sincronizado": true,
+  "sensores_operativos": [{"sensor": "dht22", "operativo": true}],
+  "temperatura_dispositivo": 48.5
 }
 ```
+
+`sensores_operativos` y `temperatura_dispositivo` (°C) son de D11 (BRK-07),
+opcionales: `sensor` es el mismo identificador que viaja en el campo `sensor`
+de la telemetría. Se guardan en `modulo3.heartbeats.json_sensores_operativos` y
+`temperatura_dispositivo` cuando la migración DB-03 del backend está aplicada;
+antes de eso el broker los descarta y el heartbeat se guarda como siempre.
 
 ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo IoT):
 
@@ -211,6 +225,100 @@ ACK de configuración (`.../status`, RF-23 — propuesto, confirmar con equipo I
   "resultado": "OK"
 }
 ```
+
+Comandos de D7 (BRK-05, `.../command`, mismo patrón de RF-17). El backend llama
+`POST /v1/commands` con uno de estos `origen`; el broker publica con su
+`tipo_comando`, `id_comando` y `emitido_en`, y espera el ACK de su mismo tipo
+en `status` (`{"tipo_mensaje": "<ACK>", "resultado": "OK", "id_comando": ...}`).
+El contenido de `regla` y `configuracion` lo arma el backend desde su tabla y
+lo interpreta el firmware: el broker no lo valida por dentro.
+
+| `origen` | `tipo_comando` | ACK | Campos |
+|---|---|---|---|
+| `regla_compuesta` | `REGLA_COMPUESTA` | `ACK_REGLA` | `id_regla_alerta`, `version_regla`, `es_activa`, `regla` |
+| `config_motor` | `CONFIG_MOTOR_IA` | `ACK_CONFIG_MOTOR` (*) | `tipo_modelo`, `config_version`, `configuracion` |
+| `tipo_modelo` | `TIPO_MODELO_ASIGNADO` | `ACK_TIPO_MODELO` (*) | `id_infraestructura`, `tipo_modelo_asignado` |
+
+(*) Nombre propuesto por Desarrollo; AIoT lo confirma en su PR del firmware.
+`ACK_CONFIG_MOTOR` trae además el `config_version` que quedó activo en el nodo:
+la respuesta de `/v1/commands` lo devuelve en `config_version` para que el
+backend lo compare con el suyo (RF-65 E10).
+
+Aviso de buffer (`.../status`, BRK-06 / D10 de AIOT-DEV-03). El broker lo
+reenvía a `POST /iot/eventos-buffer` del backend con el `serial` del topic y su
+token de servicio (BRK-02); el backend crea la alerta técnica RF-60 y el evento
+RF-63. El reenvío corre aparte del bucle MQTT: un backend lento no frena la
+telemetría. Si el backend no responde, el evento queda en el log del broker.
+
+```json
+{
+  "tipo_mensaje": "EVENTO_BUFFER",
+  "evento": "BUFFER_OVERFLOW | BUFFER_DATA_CORRUPTION",
+  "porcentaje_ocupacion": 100.0,
+  "politica_aplicada": "POLITICA_RECHAZO",
+  "cantidad_datos_afectados": 12,
+  "timestamp_evento": "2026-10-17T10:00:00-05:00"
+}
+```
+
+Visión, eventos Edge y reportes OTA (BRK-03, BRK-04, BRK-08 / D4-D6 de
+AIOT-DEV-03). El broker no los interpreta: los reenvía a un endpoint interno
+del backend con su token de servicio, en una tarea aparte del bucle MQTT. El
+`serial` es siempre el del topic (lo autenticó la ACL); si el cuerpo trae otro,
+se ignora.
+
+| Topic | Endpoint del backend | Cuerpo |
+|---|---|---|
+| `vision` | `POST /iot/telemetria/vision` | el sobre de D4 tal cual + `serial` |
+| `evento` | `POST /iot/eventos-edge` | el evento RF-55 tal cual + `serial` |
+| `ota/<evento>` | `POST /prediccion/ota/reportes` | `serial`, `id_despliegue_ota`, `componente`, `evento` y el resto en `detalle` |
+
+La ACL de cada nodo cubre esos topics de su serial; los reportes OTA van uno
+por uno (sin comodín), así que el nodo no puede publicar en `ota/notify` ni en
+un `ota/<evento>` fuera del contrato.
+
+Prioridad bajo saturación (BRK-09, RF-53 E15). Los mensajes pasan por una cola
+de prioridad: control (`status`, `ota/*`) antes que críticos (heartbeat, eventos
+Edge, lecturas con `"nivel_umbral": "critico"` o de una variable marcada
+`es_critica` en M09) antes que el resto. Si el gateway se satura, las lecturas
+normales reciben `RETENER` / `ERROR_SATURACION` y el Edge las reintenta. La
+definición completa de "dato crítico" y la configuración están en
+[`docs/BRK-09_Cola_Priorizacion_Saturacion.md`](./docs/BRK-09_Cola_Priorizacion_Saturacion.md).
+
+Resultado de la ingesta (`.../resultado`, BRK-01 — formato propuesto por
+Desarrollo, AIoT lo confirma en FW-01). Por cada lectura de `telemetry`, el
+broker publica lo que devolvió `fn_ingesta_telemetria` (D2 de AIOT-DEV-03) y
+lo deja también en `transmisiones_mqtt.estado`:
+
+```json
+{
+  "tipo_mensaje": "RESULTADO_INGESTA",
+  "id_mensaje": "<eco del id_mensaje de la lectura, si lo trae>",
+  "sensor": "dht22",
+  "variable": "Temperatura del agua",
+  "timestamp_captura": "2026-08-17T14:00:00Z",
+  "resultado": "EXITO | FALLIDO | TIMEOUT",
+  "accion_buffer": "LIBERAR | RETENER",
+  "codigo": "LECTURA_VALIDA | FUERA_DE_RANGO | ERROR_CALIBRACION | ERROR_* | ERROR_PERSISTENCIA | ERROR_SATURACION",
+  "mensaje": "ERROR_TIEMPO: timestamp_captura futuro.",
+  "id_telemetria": 123
+}
+```
+
+| Resultado de la función | `transmisiones_mqtt.estado` | `accion_buffer` |
+|---|---|---|
+| Persistida (`id_telemetria` no nulo) | `EXITO` | `LIBERAR` |
+| `ERROR_DUPLICADO` (ya estaba persistida) | `FALLIDO` + `error_descripcion` | `LIBERAR` |
+| `ERROR_ESTRUCTURA` / `ERROR_AUTENTICACION` / `ERROR_TIEMPO` / `ERROR_UNIDAD` / `ERROR_SENSOR` | `FALLIDO` + `error_descripcion` | `LIBERAR` (rechazo definitivo) |
+| Excepción, timeout o BD caída | `FALLIDO` / `TIMEOUT` si se puede escribir | `RETENER` (reintentar con backoff, RF-54) |
+
+El nodo correlaciona el aviso con su lectura por `id_mensaje` (campo opcional de
+la telemetría que el broker devuelve tal cual) o, si no lo manda, por
+`(sensor, variable, timestamp_captura)`. Va en un topic propio y no en
+`command` porque el firmware actual trata todo `command` sin `tipo_comando`
+como una configuración RF-23. Hasta que el Edge se suscriba (FW-01) el aviso no
+tiene suscriptores y se descarta sin efecto; mientras tanto el Edge sigue
+liberando con el PUBACK.
 
 Si llega mientras `/v1/commands` está esperando el ACK de ese `serial`
 (dentro de `MQTT_ACK_TIMEOUT_SECONDS`), la request en curso responde
@@ -227,6 +335,7 @@ inverso, fuera de alcance de RF-23 en su primera entrega).
 | `GET` | `/v1/healthz` | Salud del servicio | — |
 | `POST` | `/v1/commands` | Enviar comando a un dispositivo (RF-23) o un umbral a un Gateway Edge (RF-17) | Bearer |
 | `GET` | `/v1/devices` | Estado de dispositivos IoT | Bearer |
+| `POST` | `/v1/ota/notify` | Aviso de OTA de modelo a un nodo (BRK-08); `202` al publicar, `503` sin MQTT | Bearer |
 
 `POST /v1/commands` es síncrono: si el dispositivo está `ACTIVO`
 (`modulo3.estados_dispositivos_iot`), publica el comando y espera hasta
@@ -242,6 +351,29 @@ curl -X POST http://localhost:8000/v1/commands \
   -H "Authorization: Bearer <TOKEN_DE_SERVICIO>" \
   -H "Content-Type: application/json" \
   -d '{"origen": "configuracion", "serial": "IOT-EST01-HLA-001", "frecuencia_captura": 60, "intervalo_transmision": 300}'
+```
+
+`POST /v1/ota/notify` (BRK-08, D6 paso 3) no espera la instalación: publica en
+`sgpmp/<serial>/ota/notify` (QoS 1; con la sesión persistente del Edge,
+Mosquitto lo entrega al reconectar) y responde `202` con el `id_mensaje` del
+aviso. El nodo reporta el avance por `ota/<evento>`, que el broker reenvía a
+`POST /prediccion/ota/reportes`. `parametros` (fragmento, reintentos, batería
+mínima, ventana) viaja tal cual desde el backend. Contrato propuesto por
+Desarrollo hasta que DEV-15 fije el suyo:
+
+```json
+{
+  "serial": "EDGE-REMANSO-01",
+  "id_despliegue_ota": 31,
+  "tipo_modelo": "AVES",
+  "componente": "DETECTOR",
+  "version": "3.0.0",
+  "url_descarga": "https://.../prediccion/ota/artefactos/31?firma=...&expira=...",
+  "sha256": "<64 hex en minúsculas>",
+  "firma": "<firma del artefacto>",
+  "tamano_bytes": 1048576,
+  "parametros": {"tamano_fragmento_bytes": 65536, "max_reintentos_descarga": 5}
+}
 ```
 
 Respuestas posibles (siempre `200` si el request es válido — el resultado
