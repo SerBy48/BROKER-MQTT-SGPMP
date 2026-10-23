@@ -1,3 +1,6 @@
+# | Fecha      | Nombre           | Que se hizo                                   |
+# |------------|------------------|-----------------------------------------------|
+# | 2026-10-22 | Arekkazu         | HOTFIX BRK-02: avisar al arrancar sin backend |
 """Punto de entrada de SGPMP.
 
 Levanta la API HTTPS (FastAPI) y, en el ciclo de vida, arranca/para la
@@ -14,6 +17,7 @@ from fastapi import FastAPI, Request
 
 from app.api.router import api_router
 from app.backend import client as backend_client
+from app.config import get_settings
 from app.core.logging import setup_logging
 from app.mqtt.client import mqtt_gateway
 
@@ -24,6 +28,13 @@ logger = logging.getLogger("app.api")
 async def lifespan(app: FastAPI):
     setup_logging()
     logger.info("SGPMP arrancando: API HTTPS + cliente MQTT")
+    settings = get_settings()
+    if not settings.backend_url or not settings.broker_service_token:
+        # Sin esto, buffer/visión/eventos Edge/OTA solo se ven al primer reenvío fallido.
+        logger.error(
+            "BACKEND_URL y/o BROKER_SERVICE_TOKEN sin configurar: los eventos de "
+            "control (buffer, visión, eventos Edge, OTA) NO se reenviarán al backend."
+        )
     mqtt_gateway.start()
     try:
         yield
