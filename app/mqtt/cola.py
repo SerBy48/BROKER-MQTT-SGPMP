@@ -36,7 +36,7 @@ from collections import Counter
 from app.config import get_settings
 from app.mqtt import dynsec, handlers
 from app.services import ingest
-from app.services.prioridad import Prioridad, clasificar
+from app.services.prioridad import Prioridad, clasificar, mantener_catalogo
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +65,8 @@ class ColaIngesta:
         self._workers = [
             asyncio.create_task(self._trabajar()) for _ in range(get_settings().mqtt_cola_workers)
         ]
+        # El catálogo de M09 se refresca aparte: recibir() nunca espera a la BD.
+        self._workers.append(asyncio.create_task(mantener_catalogo()))
 
     async def detener(self) -> None:
         for tarea in self._workers:

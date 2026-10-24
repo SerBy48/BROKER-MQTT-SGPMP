@@ -1,6 +1,6 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
-# | 2026-10-20 | Arekkazu | BRK-11 RFC-016: severidad del broker, criticidad del área, origen y oráculo §4 |
+# | 2026-10-20 | Arekkazu | BRK-11 RFC-016: severidad, criticidad del área, origen y oráculo §4 |
 """BRK-09/BRK-11 (RF-53 E15, RFC-016 v1.2): cola de prioridad bajo saturación."""
 
 from __future__ import annotations
@@ -18,13 +18,17 @@ from app.mqtt.cola import ColaIngesta
 from app.services import prioridad
 from app.services.prioridad import Prioridad, clasificar
 
+# Formato real de RF-17: tres bandas contiguas y excluyentes que cubren [valor_min,
+# valor_max] (umbrales 1 y 10 de DEV). La especie B es más exigente con el frío.
+ESPECIE_A = (("critico", 0.0, 20.0), ("precaucion", 20.0, 25.0), ("normal", 25.0, 30.0))
+ESPECIE_B = (("critico", 0.0, 22.0), ("precaucion", 22.0, 26.0), ("normal", 26.0, 32.0))
 
-# Área 1 ALTA con dos especies (bandas críticas de cada una), área 2 BAJA, área 3 sin
-# nivel_criticidad (MEDIA). Los dispositivos A1, B2 y M3 viven en esas áreas.
+# Área 1 ALTA con las dos especies, área 2 BAJA, área 3 MEDIA (sin nivel_criticidad
+# en la BD). Los dispositivos A1, B2 y M3 viven en esas áreas.
 CONTEXTO = registry.ContextoPrioridad(
     area_por_serial={"A1": 1, "B2": 2, "M3": 3},
-    criticidad_por_area={1: "ALTA", 2: "BAJA"},
-    bandas_criticas={(1, "Temperatura del agua"): [(0.0, 20.0), (18.0, 25.0)]},
+    criticidad_por_area={1: "ALTA", 2: "BAJA", 3: "MEDIA"},
+    umbrales={(1, "Temperatura del agua"): [ESPECIE_A, ESPECIE_B]},
 )
 
 
@@ -35,10 +39,13 @@ def _entorno(monkeypatch):
     monkeypatch.setenv("MQTT_COLA_WORKERS", "1")
     get_settings.cache_clear()
 
-    async def catalogo():
-        return frozenset({"Oxígeno disuelto"}), CONTEXTO
+    monkeypatch.setattr(prioridad, "_cache",
+                        {"criticas": frozenset({"Oxígeno disuelto"}), "contexto": CONTEXTO})
 
-    monkeypatch.setattr(prioridad, "_catalogo", catalogo)
+    async def sin_refresco():  # la caché la fija la prueba, no la BD
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(cola_mod, "mantener_catalogo", sin_refresco)
     yield
     get_settings.cache_clear()
 
@@ -65,14 +72,20 @@ async def test_definicion_de_dato_critico(tipo, data, esperado) -> None:
 
 
 @pytest.mark.parametrize("serial, data, critica", [
-    ("A1", _lectura(valor_crudo=19.0), True),                       # banda de una sola especie
-    ("A1", _lectura(valor_crudo=22.0), True),                       # banda de la otra especie
-    ("A1", _lectura(valor_crudo=27.0, nivel_umbral="critico"), False),  # el broker sabe más que el Edge
-    ("B2", _lectura(valor_crudo=1.0, nivel_umbral="critico"), True),   # sin umbral: vale la pista
+    ("A1", _lectura(valor_crudo=28.0), False),  # normal en las dos especies
+    ("A1", _lectura(valor_crudo=25.0), False),  # límite precaucion/normal: ninguna es critico
+    ("A1", _lectura(valor_crudo=24.0), False),  # precaucion en las dos
+    ("A1", _lectura(valor_crudo=21.0), True),   # precaucion en A, critico en B: manda B
+    ("A1", _lectura(valor_crudo=19.0), True),   # critico en las dos
+    ("A1", _lectura(valor_crudo=31.0), True),   # normal en B, fuera del rango de A
+    ("A1", _lectura(valor_crudo=40.0), True),   # fuera de rango en las dos
+    ("A1", _lectura(valor_crudo=27.0, nivel_umbral="critico"), False),  # el broker sabe más
+    ("B2", _lectura(valor_crudo=1.0, nivel_umbral="critico"), True),   # sin umbral: la pista
     ("B2", _lectura(valor_crudo=1.0), False),
     ("A1", _lectura(valor_crudo="x"), False),
-], ids=["especie-1", "especie-2-mas-restrictiva", "edge-no-manda", "pista-del-edge",
-        "sin-umbral-ni-pista", "valor-no-numerico"])
+], ids=["normal", "limite-precaucion-normal", "precaucion", "critico-en-una-especie",
+        "critico-en-ambas", "fuera-de-rango-de-una", "fuera-de-rango", "edge-no-manda",
+        "pista-del-edge", "sin-umbral-ni-pista", "valor-no-numerico"])
 async def test_severidad_la_decide_el_broker(serial, data, critica) -> None:
     prioridad_, clave = await clasificar("telemetry", data, serial)
     assert (prioridad_ == Prioridad.CRITICO) is critica and (clave[1] == 0) is critica
@@ -159,18 +172,21 @@ ESPERADO_RFC016 = [
 
 
 def _mensajes_rfc016():
+    viejo, muy_viejo = "2026-10-18T09:00:00+00:00", "2026-10-15T00:00:00+00:00"
+    ts = "2026-10-18T10:00:00+00:00"
     return [
         ("sgpmp/B2/telemetry", _lectura(marca="sgpmp/B2/telemetry")),
-        ("sgpmp/A1/telemetry", _lectura(valor_crudo=27.0, marca="sgpmp/A1/telemetry#buffer", origen="BUFFER_LOCAL",
-                                        timestamp_captura="2026-10-18T09:00:00+00:00")),
-        ("sgpmp/A1/telemetry", _lectura(valor_crudo=27.0, marca="sgpmp/A1/telemetry#buffer-viejo", origen="BUFFER_LOCAL",
-                                        timestamp_captura="2026-10-15T00:00:00+00:00")),
+        ("sgpmp/A1/telemetry", _lectura(valor_crudo=27.0, marca="sgpmp/A1/telemetry#buffer",
+                                        origen="BUFFER_LOCAL", timestamp_captura=viejo)),
+        ("sgpmp/A1/telemetry", _lectura(valor_crudo=27.0, marca="sgpmp/A1/telemetry#buffer-viejo",
+                                        origen="BUFFER_LOCAL", timestamp_captura=muy_viejo)),
         ("sgpmp/M3/telemetry", _lectura(marca="sgpmp/M3/telemetry")),
-        ("sgpmp/A1/heartbeat", {"marca": "sgpmp/A1/heartbeat", "timestamp_captura": "2026-10-18T10:00:00+00:00"}),
-        ("sgpmp/B2/telemetry", _lectura(marca="sgpmp/B2/telemetry#critica", variable="Oxígeno disuelto")),
+        ("sgpmp/A1/heartbeat", {"marca": "sgpmp/A1/heartbeat", "timestamp_captura": ts}),
+        ("sgpmp/B2/telemetry", _lectura(marca="sgpmp/B2/telemetry#critica",
+                                        variable="Oxígeno disuelto")),
         ("sgpmp/A1/telemetry", _lectura(valor_crudo=27.0, marca="sgpmp/A1/telemetry#real")),
         ("sgpmp/X/status", {"marca": "sgpmp/X/status", "tipo_mensaje": "ACK_UMBRAL"}),
-        ("sgpmp/A1/evento", {"marca": "sgpmp/A1/evento", "timestamp_evento": "2026-10-18T10:00:00+00:00"}),
+        ("sgpmp/A1/evento", {"marca": "sgpmp/A1/evento", "timestamp_evento": ts}),
         ("sgpmp/A1/telemetry", _lectura(marca="sgpmp/A1/telemetry#critica", valor_crudo=10.0)),
     ]
 
@@ -254,14 +270,25 @@ async def test_catalogo_sin_columna_es_critica_no_marca_ninguna() -> None:
     assert await registry.variables_criticas(_Sesion()) == set()
 
 
-async def test_si_la_bd_falla_se_conserva_el_contexto_anterior(monkeypatch) -> None:
-    monkeypatch.undo()  # sin el doble del fixture: se prueba la caché real
-    monkeypatch.setenv("DATABASE_URL", "postgresql+asyncpg://u:p@localhost/db")
-    monkeypatch.setattr(prioridad, "_cache", {"criticas": frozenset({"NH3"}), "contexto": CONTEXTO,
-                                              "leido_en": -1e9})
+async def test_una_lectura_caida_no_descarta_la_otra(monkeypatch) -> None:
+    nuevo = CONTEXTO._replace(criticidad_por_area={1: "BAJA"})
 
     async def caida(_session):
         raise ConnectionRefusedError()
 
+    async def contexto(_session):
+        return nuevo
+
     monkeypatch.setattr(prioridad.registry, "variables_criticas", caida)
-    assert await prioridad._catalogo() == (frozenset({"NH3"}), CONTEXTO)
+    monkeypatch.setattr(prioridad.registry, "contexto_prioridad", contexto)
+    await prioridad.refrescar_catalogo()
+    assert prioridad._catalogo() == (frozenset({"Oxígeno disuelto"}), nuevo)
+
+
+@pytest.mark.parametrize("tipo, area_id, esperado", [
+    ("vision", 2, 2),           # visión indica su área
+    ("vision", 99, 1),          # área desconocida: la del dispositivo
+    ("telemetry", 2, 1),        # solo visión puede indicar otra área
+])
+def test_area_id_del_mensaje_solo_en_vision_y_conocida(tipo, area_id, esperado) -> None:
+    assert prioridad._area(tipo, "A1", {"area_id": area_id}, CONTEXTO) == esperado
