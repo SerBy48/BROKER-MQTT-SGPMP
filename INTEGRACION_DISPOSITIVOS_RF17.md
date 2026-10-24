@@ -53,12 +53,12 @@ confirmado", que es lo correcto.
   "version": "2026-10-05T17:59:58.000000+00:00",
   "variable": "temperatura",
   "unidad": "°C",
-  "valor_min": 18.0,
-  "valor_max": 32.0,
+  "valor_min": 0.0,
+  "valor_max": 30.0,
   "niveles": [
-    {"nivel": "normal", "limite_inferior": 22.0, "limite_superior": 28.0},
-    {"nivel": "precaucion", "limite_inferior": 20.0, "limite_superior": 30.0},
-    {"nivel": "critico", "limite_inferior": 18.0, "limite_superior": 32.0}
+    {"nivel": "critico", "limite_inferior": 0.0, "limite_superior": 20.0},
+    {"nivel": "precaucion", "limite_inferior": 20.0, "limite_superior": 23.0},
+    {"nivel": "normal", "limite_inferior": 23.0, "limite_superior": 30.0}
   ]
 }
 ```
@@ -71,7 +71,7 @@ confirmado", que es lo correcto.
 | `variable` | Mismo nombre que el Edge manda en el campo `variable` de la telemetría (`modulo9.variables_ambientales.nombre`) |
 | `unidad` | Unidad de los valores |
 | `valor_min`, `valor_max` | Rango aceptable de la variable para la especie |
-| `niveles` | Bandas de alerta `normal` / `precaucion` / `critico` con sus límites |
+| `niveles` | Bandas de alerta `normal` / `precaucion` / `critico` con sus límites. Son **contiguas y excluyentes** y cubren `[valor_min, valor_max]` (la plataforma rechaza otra forma con `SOLAPAMIENTO_NIVELES`): una lectura está en el nivel de la banda que la contiene, y fuera de todas es crítica, como el ROJO del semáforo de la plataforma |
 
 ## 3. Qué tiene que hacer el Edge
 
@@ -154,10 +154,10 @@ curl -X POST http://localhost:8000/v1/commands \
   -H "Content-Type: application/json" \
   -d '{"origen":"umbral","serial":"<serial Edge>","id_umbral_ambiental":7,
        "version":"2026-10-05T17:59:58+00:00","variable":"temperatura","unidad":"°C",
-       "valor_min":18,"valor_max":32,
-       "niveles":[{"nivel":"normal","limite_inferior":22,"limite_superior":28},
-                  {"nivel":"precaucion","limite_inferior":20,"limite_superior":30},
-                  {"nivel":"critico","limite_inferior":18,"limite_superior":32}]}'
+       "valor_min":0,"valor_max":30,
+       "niveles":[{"nivel":"critico","limite_inferior":0,"limite_superior":20},
+                  {"nivel":"precaucion","limite_inferior":20,"limite_superior":23},
+                  {"nivel":"normal","limite_inferior":23,"limite_superior":30}]}'
 ```
 
 ⚠️ **Contrato propuesto por backend/broker, pendiente de confirmar con AIoT.**

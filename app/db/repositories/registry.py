@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-10-20 | Arekkazu | BRK-11 RFC-016: contexto de prioridad (área, criticidad, RF-17) |
 """Acceso al registro/catálogo IoT (schema modulo9, solo lectura)."""
 
 from __future__ import annotations
@@ -77,6 +80,94 @@ async def variables_criticas(session: AsyncSession) -> set[str]:
         text("SELECT nombre FROM modulo9.variables_ambientales WHERE es_critica = true")
     )
     return {nombre for (nombre,) in result}
+
+
+async def _existe_columna(session: AsyncSession, tabla: str, columna: str) -> bool:
+    result = await session.execute(
+        text(
+            "SELECT 1 FROM information_schema.columns "
+            "WHERE table_schema = 'modulo9' AND table_name = :t AND column_name = :c"
+        ),
+        {"t": tabla, "c": columna},
+    )
+    return result.first() is not None
+
+
+# Niveles de RF-17 de un umbral (una especie): (nivel, limite_inferior, limite_superior).
+NivelesUmbral = tuple[tuple[str, float, float], ...]
+
+
+class ContextoPrioridad(NamedTuple):
+    """Lo que la cola de RFC-016 necesita de M09 para ordenar sin consultar por mensaje."""
+
+    area_por_serial: dict[str, int]  # dispositivo -> área
+    criticidad_por_area: dict[int, str]  # ALTA / MEDIA / BAJA, todas las áreas conocidas
+    umbrales: dict[tuple[int, str], list[NivelesUmbral]]  # (área, variable) -> uno por especie
+
+
+async def contexto_prioridad(session: AsyncSession) -> ContextoPrioridad:
+    """Área de cada dispositivo, `nivel_criticidad` de cada área (RF-20) y los niveles de
+    RF-17 de todas las especies presentes en cada área (RFC-012).
+
+    Los tres niveles (`normal`, `precaucion`, `critico`) de un umbral son bandas contiguas
+    y excluyentes que cubren [valor_min, valor_max] (el backend rechaza otra forma con
+    SOLAPAMIENTO_NIVELES). Por eso se leen los tres y no solo `critico`.
+
+    Tolera la BD anterior a DB-06/DB-07: sin `nivel_criticidad` todas las áreas son
+    `MEDIA`, y sin `infraestructuras_especies` la especie sale de
+    `infraestructuras.id_especie`.
+    """
+    area_por_serial = {
+        serial: area
+        for serial, area in await session.execute(
+            text(
+                "SELECT serial, id_infraestructura FROM modulo9.dispositivos_iot "
+                "WHERE id_infraestructura IS NOT NULL"
+            )
+        )
+    }
+    criticidad = (
+        "nivel_criticidad::text"
+        if await _existe_columna(session, "infraestructuras", "nivel_criticidad")
+        else "'MEDIA'"
+    )
+    criticidad_por_area: dict[int, str] = dict(
+        (
+            await session.execute(
+                text(f"SELECT id_infraestructura, {criticidad} FROM modulo9.infraestructuras")
+            )
+        ).all()
+    )
+    if await _existe_columna(session, "infraestructuras_especies", "id_especie"):
+        especies_area = (
+            "SELECT id_infraestructura, id_especie FROM modulo9.infraestructuras_especies"
+        )
+    else:
+        especies_area = (
+            "SELECT id_infraestructura, id_especie FROM modulo9.infraestructuras "
+            "WHERE id_especie IS NOT NULL"
+        )
+    result = await session.execute(
+        text(
+            "SELECT ae.id_infraestructura, va.nombre, u.id_umbral_ambiental, n.nivel::text, "
+            "n.limite_inferior, n.limite_superior "
+            f"FROM ({especies_area}) ae "
+            "JOIN modulo9.umbrales_ambientales u ON u.id_especie = ae.id_especie AND u.es_activo "
+            "JOIN modulo9.variables_ambientales va "
+            "  ON va.id_variable_ambiental = u.id_variable_ambiental "
+            "JOIN modulo9.niveles_alerta_ambientales n "
+            "  ON n.id_umbral_ambiental = u.id_umbral_ambiental"
+        )
+    )
+    por_umbral: dict[tuple[int, str, int], list[tuple[str, float, float]]] = {}
+    for area, variable, umbral, nivel, inferior, superior in result:
+        por_umbral.setdefault((area, variable, umbral), []).append(
+            (nivel, float(inferior), float(superior))
+        )
+    umbrales: dict[tuple[int, str], list[NivelesUmbral]] = {}
+    for (area, variable, _), niveles in por_umbral.items():
+        umbrales.setdefault((area, variable), []).append(tuple(niveles))
+    return ContextoPrioridad(area_por_serial, criticidad_por_area, umbrales)
 
 
 async def resolve_sensor_id(

@@ -9,6 +9,57 @@
 
 ---
 
+## 0. Actualización BRK-11 (RFC-016 v1.2, 2026-10-20)
+
+RFC-016 v1.2 aprobó esta cola con tres correcciones, ya aplicadas en `app/services/prioridad.py`. Las secciones de abajo quedan como contexto de BRK-09; donde difieren, rige esta.
+
+**Orden de salida.** Cada mensaje lleva una clave determinista y sale primero la menor:
+
+| # | Factor | Valores, de primero a último |
+|---|---|---|
+| 0 | Control | `status` y `ota/*` antes que todo (P-6: propuesta de Desarrollo, un ACK perdido desincroniza nodo y backend) |
+| 1 | Severidad (A.3, binaria) | crítica → resto |
+| 2 | `nivel_criticidad` del área (A.1, RF-20) | ALTA → MEDIA → BAJA (sin dato: MEDIA) |
+| 3 | Tipo de dato | evento Edge (RF-55) → heartbeat (B.6) → telemetría escalar o visión |
+| 4 | Origen (A.2) | `TIEMPO_REAL` → `BUFFER_LOCAL` |
+| 5 | Antigüedad | `timestamp_captura` más viejo primero; empate por serial |
+
+**Severidad (A.3).** La calcula el broker. Una lectura es crítica si su variable es `es_critica` o si, para **alguna** especie del área (la más restrictiva, RFC-012), su `valor_crudo` cae en la banda `critico` de RF-17 **o fuera de todas sus bandas**. El `nivel_umbral` del Edge solo se usa cuando el broker no tiene umbral para esa área y variable. Hoy el Edge no lo envía.
+
+Las tres bandas de un umbral (`normal`, `precaucion`, `critico`) son **contiguas y excluyentes** y cubren `[valor_min, valor_max]`: el backend rechaza cualquier otra forma con `400 SOLAPAMIENTO_NIVELES` (`registrar_umbral_use_case.py`, FA-05), y así están los umbrales en DEV. No son anidadas. Fuera de todas las bandas el semáforo del backend es ROJO (`SemaforoCalculator.calcular_por_niveles`), y el broker aplica la misma regla. En el límite entre dos bandas cuenta la más grave.
+
+Ejemplo con dos especies en un área (umbrales 1 y 10 de DEV, temperatura del agua):
+
+| Valor | Especie A: critico 0–20, precaucion 20–25, normal 25–30 | Especie B: critico 0–22, precaucion 22–26, normal 26–32 | ¿Crítica? |
+|---|---|---|---|
+| 28 | normal | normal | no |
+| 24 | precaucion | precaucion | no |
+| 21 | precaucion | critico | **sí** (manda B) |
+| 19 | critico | critico | **sí** |
+| 31 | fuera de rango | normal | **sí** (manda A) |
+| 40 | fuera de rango | fuera de rango | **sí** |
+
+**Área.** Se usa el área del dispositivo emisor (`dispositivos_iot.id_infraestructura`), la misma que usa `fn_ingesta_telemetria` para elegir el umbral. Solo un mensaje de visión puede indicar otra con `area_id`, y solo si es un área conocida: un Edge no puede adelantarse en la cola declarando un área ALTA.
+
+**Admisión (sin cambio).** CONTROL nunca se rechaza; CRITICO (dato crítico, heartbeat o evento Edge) a partir de 2 × capacidad; NORMAL a partir de la capacidad; el rechazo de una lectura devuelve `RETENER`.
+
+**Lectura de M09.** Área por dispositivo, criticidad por área y los tres niveles de RF-17 por (área, variable, especie) se leen en bloque, junto con el catálogo de `es_critica`, en una tarea de fondo cada 10 min. La arranca `ColaIngesta.iniciar()` y se cancela en `detener()`, así que clasificar un mensaje nunca espera a la BD. Las dos lecturas se refrescan por separado: si una falla, la otra se actualiza igual, y se registra un warning con la causa. Hasta la primera lectura no hay umbrales ni áreas: se ordena con la pista del Edge y criticidad MEDIA. Con la BD anterior a DB-06/DB-07 sigue funcionando: todas las áreas son MEDIA y la especie sale de `infraestructuras.id_especie`.
+
+**Checklist de despliegue (DBA).** El rol del broker debe poder **ver las filas**, no solo tener el permiso, en:
+
+| Tabla | Para qué | RLS en DEV (2026-10-23) |
+|---|---|---|
+| `modulo9.dispositivos_iot` | área por dispositivo | FORCE; política `pol_dispositivos_iot_servicio` |
+| `modulo9.infraestructuras` | `nivel_criticidad` | FORCE; **solo política por usuario, sin política de servicio** |
+| `modulo9.infraestructuras_especies` | especies del área | FORCE; política `pol_infraestructuras_especies_all` (servicio) |
+| `modulo9.umbrales_ambientales` | umbral por especie | FORCE; lectura `true` |
+| `modulo9.niveles_alerta_ambientales` | bandas RF-17 | FORCE; lectura `true` |
+| `modulo9.variables_ambientales` | nombre de la variable y `es_critica` | sin RLS |
+
+El broker no fija `app.current_user_id`, así que las políticas de servicio (`fn_es_usuario_servicio()`) no lo cubren. Necesita `SELECT` sobre las seis tablas y, además, un rol con `BYPASSRLS` o políticas que lo incluyan. Si no ve `infraestructuras`, la prioridad sigue funcionando pero todas las áreas quedan MEDIA (A.1 inactiva). Si falla `contexto_prioridad`, queda el warning en el log cada 10 min.
+
+**Aviso a AIoT.** `nivel_umbral` deja de decidir la prioridad cuando el broker conoce el umbral: es solo una pista.
+
 ## 1. Qué es un dato crítico
 
 Un mensaje del nodo cae en una de tres prioridades. La regla usa solo datos que el broker ya tiene: el tipo de topic, lo que el Edge calcula con sus umbrales y una marca del catálogo que edita el Administrador. Ninguna lista de variables queda fija en el código.

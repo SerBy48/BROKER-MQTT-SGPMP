@@ -1,4 +1,7 @@
-"""Cola de prioridad de los mensajes del nodo bajo saturación (BRK-09, RF-53 E15).
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-10-20 | Arekkazu | BRK-11 RFC-016: la cola ordena por la clave compuesta de prioridad |
+"""Cola de prioridad de los mensajes del nodo bajo saturación (BRK-09/BRK-11, RF-53 E15, RFC-016).
 
 El bucle de mensajes MQTT solo parsea, clasifica (services/prioridad) y encola;
 `workers` tareas procesan en paralelo en orden de prioridad. Así un pico de
@@ -11,8 +14,12 @@ nodo, y cuando el procesamiento no da abasto se pierde primero lo menos importan
 
 Una lectura rechazada recibe `RETENER` en su topic `resultado`: el Edge la conserva
 en su buffer y la reintenta (RF-54), así que rechazar no es perderla. Dentro de cada
-prioridad sale primero el dato más viejo, que es el que está más cerca de vencer
-(72 h de RF-53).
+clase el orden lo da la clave compuesta de services/prioridad (severidad,
+criticidad del área, tipo de dato, origen, antigüedad).
+
+ponytail: el rechazo es por clase al llegar, no desaloja lo que ya está en cola. Un
+dato NORMAL encolado sigue ahí aunque llegue otro de mejor clave con la cola llena;
+si hace falta, pasar a un heap de doble extremo y desalojar el peor con RETENER.
 
 ponytail: sin orden por serial entre workers. Un heartbeat y un aviso de
 desconexión del mismo Edge pueden procesarse cruzados; lo peor es un comando que
@@ -24,29 +31,16 @@ from __future__ import annotations
 import asyncio
 import itertools
 import logging
-import time
 from collections import Counter
-from datetime import datetime
 
 from app.config import get_settings
 from app.mqtt import dynsec, handlers
 from app.services import ingest
-from app.services.prioridad import Prioridad, clasificar
+from app.services.prioridad import Prioridad, clasificar, mantener_catalogo
 
 logger = logging.getLogger(__name__)
 
 _LOG_CADA = 100  # bajo saturación, un warning por cada 100 rechazos y no uno por mensaje
-
-
-def _antiguedad(data: dict) -> float:
-    """Clave de orden dentro de una prioridad: la captura del dato o, si no la trae, ahora."""
-    valor = data.get("timestamp_captura") or data.get("timestamp_evento")
-    if isinstance(valor, str):
-        try:
-            return datetime.fromisoformat(valor.replace("Z", "+00:00")).timestamp()
-        except ValueError:
-            pass
-    return time.time()
 
 
 class ColaIngesta:
@@ -71,6 +65,8 @@ class ColaIngesta:
         self._workers = [
             asyncio.create_task(self._trabajar()) for _ in range(get_settings().mqtt_cola_workers)
         ]
+        # El catálogo de M09 se refresca aparte: recibir() nunca espera a la BD.
+        self._workers.append(asyncio.create_task(mantener_catalogo()))
 
     async def detener(self) -> None:
         for tarea in self._workers:
@@ -94,13 +90,11 @@ class ColaIngesta:
         if self._cola is None:  # sin workers (p. ej. pruebas): en el acto, como antes
             await handlers.procesar(iot, data, topic)
             return
-        prioridad = await clasificar(iot.tipo, data)
+        prioridad, clave = await clasificar(iot.tipo, data, iot.serial)
         if self._cola.qsize() >= self._limite(prioridad):
             await self._rechazar(prioridad, iot, data, topic)
             return
-        self._cola.put_nowait(
-            (prioridad, _antiguedad(data), next(self._secuencia), topic, iot, data)
-        )
+        self._cola.put_nowait((clave, next(self._secuencia), topic, iot, data))
 
     async def _rechazar(self, prioridad: Prioridad, iot, data: dict, topic: str) -> None:
         self.rechazados[prioridad] += 1
@@ -117,7 +111,7 @@ class ColaIngesta:
         assert self._cola is not None
         cola = self._cola
         while True:
-            _, _, _, topic, iot, data = await cola.get()
+            _, _, topic, iot, data = await cola.get()
             try:
                 await handlers.procesar(iot, data, topic)
             finally:
