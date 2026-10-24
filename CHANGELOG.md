@@ -1,3 +1,13 @@
+## [0.4.0-rc.5](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.4...v0.4.0-rc.5) (2026-10-24)
+
+### Features
+
+* **rf53:** prioridad compuesta de RFC-016 con severidad calculada en el broker (BRK-11) ([7375f92](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/7375f92fc83988194e60ea882cff08fe62983796))
+
+### Bug Fixes
+
+* **rf53:** severidad con las bandas excluyentes de RF-17 y catalogo en tarea de fondo (BRK-11) ([81e69a9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/81e69a97762fe1a7100958bd679e08e2a84970e6))
+
 ## [0.4.0-rc.4](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.3...v0.4.0-rc.4) (2026-10-20)
 
 ### Features
