@@ -9,6 +9,10 @@ El broker no interpreta el contenido: lo valida el backend, que tiene la regla
 de negocio. Lo único que fija es la identidad: el `serial` es siempre el del
 topic, que ya autenticó la ACL de MQTT; si el nodo manda otro en el cuerpo, se
 ignora (un nodo no puede reportar por otro).
+
+El evento es la excepción: `RecibirEventoEdgeDTO` exige `device_id` y `sensor_id`
+(PKs de modulo9) y el firmware solo conoce seriales, así que el broker los
+resuelve antes de reenviar (BRK-12).
 """
 
 from __future__ import annotations
@@ -16,6 +20,8 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from app.db.engine import async_session_factory
+from app.db.repositories import registry
 from app.services import reenvio
 
 logger = logging.getLogger(__name__)
@@ -51,9 +57,70 @@ def vision(serial: str, data: dict[str, Any]) -> None:
     reenvio.reenviar(RUTA_VISION, cuerpo, f"Vector de visión de {serial}")
 
 
-def evento_edge(serial: str, data: dict[str, Any]) -> None:
-    """Evento clasificado por RF-55 en el Edge (AIOT-07)."""
+def _sensores_por_variable(
+    variables: Any, sensores: dict[str, int]
+) -> dict[str, int | None]:
+    """`tipo_variable -> id_sensores` por el `sensor` que declara cada variable, en el orden
+    del firmware (la primera es la que disparó la regla). Sin match queda `None`: un hueco
+    explícito es mejor que un dato atribuido al sensor equivocado.
+
+    TODO(IOT-1): confirmar que `sensor` del firmware se compara con `modulo9.sensores.nombre`.
+    TODO(BRK-12): el plan pide un segundo intento por el tipo de variable, pero
+    `sensores.categoria` (TEMPERATURA, HUMEDAD, ...) no tiene relación en BD con
+    `variables_ambientales`; no se infiere un mapeo hasta que el catálogo lo defina.
+    """
+    if not isinstance(variables, list):
+        return {}
+    mapa: dict[str, int | None] = {}
+    for variable in variables:
+        if not isinstance(variable, dict) or not variable.get("tipo_variable"):
+            continue
+        mapa.setdefault(variable["tipo_variable"], sensores.get(variable.get("sensor") or ""))
+    return mapa
+
+
+async def evento_edge(serial: str, data: dict[str, Any]) -> None:
+    """Evento clasificado por RF-55 en el Edge (AIOT-07), con `device_id` y `sensor_id`."""
+    async with async_session_factory() as session:
+        device_id = await registry.resolve_device_id(session, serial)
+        if device_id is None:
+            # El backend respondería 401 y lo anotaría en su bitácora de rechazos.
+            logger.warning("Evento Edge de %s descartado: serial no registrado en modulo9.", serial)
+            return
+        sensores = await registry.sensores_por_nombre(session, device_id)
+
+    por_variable = _sensores_por_variable(data.get("variables_involucradas"), sensores)
+    sin_sensor = [v for v, s in por_variable.items() if s is None]
+    if sin_sensor:
+        logger.warning("Evento Edge de %s: variables sin sensor resuelto: %s", serial, sin_sensor)
+    resueltos = [s for s in por_variable.values() if s is not None]
+    if not resueltos:
+        # `sensor_id` es obligatorio en el backend: reenviarlo sería un 422 seguro.
+        logger.warning("Evento Edge de %s descartado: ninguna variable resolvió su sensor.", serial)
+        return
+    primaria = next(iter(por_variable.values()))
+    if primaria is None:
+        logger.warning(
+            "Evento Edge de %s: la variable primaria no resolvió su sensor; "
+            "se usa el de la primera variable resuelta.",
+            serial,
+        )
+
     cuerpo = _con_serial_del_topic(serial, data, "evento")
+    cuerpo["device_id"] = device_id
+    cuerpo["sensor_id"] = primaria if primaria is not None else resueltos[0]
+    metadata = data.get("metadata_edge")
+    if metadata is None or isinstance(metadata, dict):
+        # VariableInvolucradaDTO descarta los campos extra: el mapa solo sobrevive aquí.
+        del_broker = {"sensores_por_variable": por_variable, "device_id_resuelto": device_id}
+        metadata = metadata or {}
+        if choque := del_broker.keys() & metadata.keys():
+            logger.warning(
+                "Evento Edge de %s: metadata_edge ya trae %s; se conserva lo del Edge.",
+                serial,
+                sorted(choque),
+            )
+        cuerpo["metadata_edge"] = {**del_broker, **metadata}
     reenvio.reenviar(RUTA_EVENTOS_EDGE, cuerpo, f"Evento Edge de {serial}")
 
 
