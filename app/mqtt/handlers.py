@@ -73,7 +73,7 @@ async def procesar(iot: TopicIot, data: dict, topic: str) -> None:
         elif msg_type == settings.mqtt_topic_vision:
             reenvio_nodo.vision(serial, data)
         elif msg_type == settings.mqtt_topic_evento:
-            reenvio_nodo.evento_edge(serial, data)
+            await reenvio_nodo.evento_edge(serial, data)
         else:
             logger.warning("Tipo de mensaje desconocido en topic %s", topic)
     except SgpmpError as exc:

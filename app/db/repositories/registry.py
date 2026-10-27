@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
 # | 2026-10-20 | Arekkazu | BRK-11 RFC-016: contexto de prioridad (área, criticidad, RF-17) |
+# | 2026-10-26 | SerBy48  | BRK-12 RF-55: sensores por nombre para el evento multivariable |
 """Acceso al registro/catálogo IoT (schema modulo9, solo lectura)."""
 
 from __future__ import annotations
@@ -197,6 +198,25 @@ async def resolve_sensor_id(
         )
     row = result.first()
     return row[0] if row else None
+
+
+async def sensores_por_nombre(session: AsyncSession, device_id: int) -> dict[str, int]:
+    """`nombre -> id_sensores` de los sensores del dispositivo, en una sola consulta (BRK-12).
+
+    Para el evento multivariable de RF-55: cada variable se resuelve contra este mapa, sin
+    un roundtrip por variable y sin el fallback al primer sensor activo de
+    `resolve_sensor_id` (en un evento de varias variables atribuiría todas al mismo sensor).
+    Incluye los inactivos: si el sensor está inactivo lo decide el backend, que deja el
+    intento en su bitácora. Ante nombres repetidos gana el de menor id, como en la ingesta.
+    """
+    result = await session.execute(
+        text(
+            "SELECT nombre, id_sensores FROM modulo9.sensores "
+            "WHERE id_dispositivo_iot = :device_id ORDER BY id_sensores DESC"
+        ),
+        {"device_id": device_id},
+    )
+    return dict(result.all())
 
 
 async def resolve_device_state(session: AsyncSession, serial: str) -> str | None:
