@@ -68,6 +68,9 @@ def _sensores_por_variable(
     TODO(BRK-12): el plan pide un segundo intento por el tipo de variable, pero
     `sensores.categoria` (TEMPERATURA, HUMEDAD, ...) no tiene relación en BD con
     `variables_ambientales`; no se infiere un mapeo hasta que el catálogo lo defina.
+    TODO(BRK-12): la ventana del Edge puede correlacionar lecturas de otro nodo (su
+    `serial` por variable difiere del topic); hoy se buscan en el dispositivo del topic
+    y quedan en None. Definir con IoT si se resuelven contra su propio serial.
     """
     if not isinstance(variables, list):
         return {}
@@ -88,27 +91,30 @@ async def evento_edge(serial: str, data: dict[str, Any]) -> None:
             logger.warning("Evento Edge de %s descartado: serial no registrado en modulo9.", serial)
             return
         sensores = await registry.sensores_por_nombre(session, device_id)
-
-    por_variable = _sensores_por_variable(data.get("variables_involucradas"), sensores)
-    sin_sensor = [v for v, s in por_variable.items() if s is None]
-    if sin_sensor:
-        logger.warning("Evento Edge de %s: variables sin sensor resuelto: %s", serial, sin_sensor)
-    resueltos = [s for s in por_variable.values() if s is not None]
-    if not resueltos:
-        # `sensor_id` es obligatorio en el backend: reenviarlo sería un 422 seguro.
-        logger.warning("Evento Edge de %s descartado: ninguna variable resolvió su sensor.", serial)
-        return
-    primaria = next(iter(por_variable.values()))
-    if primaria is None:
-        logger.warning(
-            "Evento Edge de %s: la variable primaria no resolvió su sensor; "
-            "se usa el de la primera variable resuelta.",
+        por_variable = _sensores_por_variable(data.get("variables_involucradas"), sensores)
+        # Raíz: la primaria; si no resolvió, la primera que sí.
+        sensor_id = next((s for s in por_variable.values() if s is not None), None)
+        if sensor_id is None:
+            # La lectura LoRa del Gateway no trae `sensor` (edge-firmware 0.3.0): la raíz
+            # sale de la misma regla que la ingesta de telemetría, para que el evento
+            # apunte al sensor donde quedó guardada su lectura. El mapa queda en None.
+            sensor_id = await registry.resolve_sensor_id(session, device_id)
+        if sensor_id is None:
+            # `sensor_id` es obligatorio en el backend: reenviarlo sería un 422 seguro.
+            logger.warning("Evento Edge de %s descartado: dispositivo sin sensores.", serial)
+            return
+    if sin_sensor := [v for v, s in por_variable.items() if s is None]:
+        # INFO y no WARNING: con el firmware actual pasa en cada evento.
+        logger.info(
+            "Evento Edge de %s: variables sin sensor resuelto %s; sensor_id=%s.",
             serial,
+            sin_sensor,
+            sensor_id,
         )
 
     cuerpo = _con_serial_del_topic(serial, data, "evento")
     cuerpo["device_id"] = device_id
-    cuerpo["sensor_id"] = primaria if primaria is not None else resueltos[0]
+    cuerpo["sensor_id"] = sensor_id
     metadata = data.get("metadata_edge")
     if metadata is None or isinstance(metadata, dict):
         # VariableInvolucradaDTO descarta los campos extra: el mapa solo sobrevive aquí.

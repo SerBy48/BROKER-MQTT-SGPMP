@@ -15,8 +15,9 @@ from app.mqtt import handlers
 from app.mqtt.handlers import TopicIot, parsear_topic
 from app.services import reenvio, reenvio_nodo
 
-DISPOSITIVOS = {"EDGE-1": 12}
+DISPOSITIVOS = {"EDGE-1": 12, "EDGE-VACIO": 13}
 SENSORES = {12: {"dht22_ambiente": 342, "dht22_humedad": 343, "ds18b20_agua": 344}}
+PRIMER_SENSOR_ACTIVO = {12: 342}
 
 
 @pytest.fixture(autouse=True)
@@ -51,7 +52,13 @@ def consultas(monkeypatch):
         lista.append(("sensores", device_id))
         return SENSORES.get(device_id, {})
 
+    async def resolve_sensor_id(_session, device_id, sensor_nombre=None):
+        assert sensor_nombre is None  # el evento solo lo usa sin nombre, para la raíz
+        lista.append(("primer_sensor", device_id))
+        return PRIMER_SENSOR_ACTIVO.get(device_id)
+
     monkeypatch.setattr(reenvio_nodo, "async_session_factory", sesion_falsa)
+    monkeypatch.setattr(reenvio_nodo.registry, "resolve_sensor_id", resolve_sensor_id)
     monkeypatch.setattr(reenvio_nodo.registry, "resolve_device_id", resolve_device_id)
     monkeypatch.setattr(reenvio_nodo.registry, "sensores_por_nombre", sensores_por_nombre)
     return lista
@@ -85,14 +92,17 @@ async def test_vision_se_reenvia_con_el_sobre_de_d4(enviados) -> None:
 
 
 def _variable(tipo: str, sensor: str | None) -> dict:
-    return {"tipo_variable": tipo, "valor": 1.0, "unidad": "u",
-            "timestamp_captura": "2026-10-26T14:30:00Z", "sensor": sensor,
-            "serial": "EDGE-1"}
+    """Como `edge_agent.reglas.evento._variable`: sin `sensor` si la lectura no lo trae."""
+    variable = {"tipo_variable": tipo, "valor": 1.0, "unidad": "u",
+                "timestamp_captura": "2026-10-26T14:30:00.000Z", "serial": "EDGE-1"}
+    if sensor is not None:
+        variable["sensor"] = sensor
+    return variable
 
 
 async def test_un_nodo_no_puede_reportar_por_otro_serial(enviados, caplog) -> None:
     evento = {"serial": "EDGE-2", "clasificacion_rf55": "NORMAL",
-              "variables_involucradas": [_variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente")]}
+              "variables_involucradas": [_variable("temperatura_ambiente", "dht22_ambiente")]}
     await _publicar("sgpmp/EDGE-1/evento", evento)
     [(ruta, cuerpo)] = enviados
     assert ruta == "/iot/eventos-edge"
@@ -104,9 +114,9 @@ async def test_evento_multivariable_resuelve_un_sensor_por_variable(enviados, co
     metadata = {"id_evento": "edge-evt-1", "regla_aplicada": "ESTRES_TERMICO",
                 "valores_derivados": {"THI": 81.3}}
     evento = {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO",
-              "variables_involucradas": [_variable("HUMEDAD_RELATIVA", "dht22_humedad"),
-                                         _variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente"),
-                                         _variable("TEMPERATURA_AGUA", "ds18b20_agua")],
+              "variables_involucradas": [_variable("humedad_relativa", "dht22_humedad"),
+                                         _variable("temperatura_ambiente", "dht22_ambiente"),
+                                         _variable("temperatura_agua", "ds18b20_agua")],
               "metadata_edge": metadata}
     await _publicar("sgpmp/EDGE-1/evento", evento)
     [(_, cuerpo)] = enviados
@@ -115,8 +125,8 @@ async def test_evento_multivariable_resuelve_un_sensor_por_variable(enviados, co
     assert cuerpo["variables_involucradas"] == evento["variables_involucradas"]
     assert cuerpo["metadata_edge"] == {
         **metadata,
-        "sensores_por_variable": {"HUMEDAD_RELATIVA": 343, "TEMPERATURA_AMBIENTAL": 342,
-                                  "TEMPERATURA_AGUA": 344},
+        "sensores_por_variable": {"humedad_relativa": 343, "temperatura_ambiente": 342,
+                                  "temperatura_agua": 344},
         "device_id_resuelto": 12,
     }
     # Una consulta de sensores por evento, no una por variable.
@@ -125,7 +135,7 @@ async def test_evento_multivariable_resuelve_un_sensor_por_variable(enviados, co
 
 async def test_serial_desconocido_se_descarta_sin_llamar_al_backend(enviados, caplog) -> None:
     evento = {"clasificacion_rf55": "NORMAL",
-              "variables_involucradas": [_variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente")]}
+              "variables_involucradas": [_variable("temperatura_ambiente", "dht22_ambiente")]}
     await _publicar("sgpmp/EDGE-9/evento", evento)
     assert enviados == []
     assert "EDGE-9 descartado" in caplog.text
@@ -133,42 +143,57 @@ async def test_serial_desconocido_se_descarta_sin_llamar_al_backend(enviados, ca
 
 async def test_variable_sin_sensor_queda_en_none_y_el_evento_se_reenvia(enviados) -> None:
     evento = {"clasificacion_rf55": "DESVIACION_COMPUESTA",
-              "variables_involucradas": [_variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente"),
-                                         _variable("HUMEDAD_RELATIVA", "inexistente"),
-                                         _variable("PH", None)]}
+              "variables_involucradas": [_variable("temperatura_ambiente", "dht22_ambiente"),
+                                         _variable("humedad_relativa", "inexistente"),
+                                         _variable("ph", None)]}
     await _publicar("sgpmp/EDGE-1/evento", evento)
     [(_, cuerpo)] = enviados
     assert cuerpo["sensor_id"] == 342
     assert cuerpo["metadata_edge"]["sensores_por_variable"] == {
-        "TEMPERATURA_AMBIENTAL": 342, "HUMEDAD_RELATIVA": None, "PH": None}
+        "temperatura_ambiente": 342, "humedad_relativa": None, "ph": None}
 
 
 async def test_primaria_sin_sensor_usa_la_primera_resuelta(enviados) -> None:
     evento = {"clasificacion_rf55": "DESVIACION_COMPUESTA",
-              "variables_involucradas": [_variable("HUMEDAD_RELATIVA", "inexistente"),
-                                         _variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente")]}
+              "variables_involucradas": [_variable("humedad_relativa", "inexistente"),
+                                         _variable("temperatura_ambiente", "dht22_ambiente")]}
     await _publicar("sgpmp/EDGE-1/evento", evento)
     [(_, cuerpo)] = enviados
     assert cuerpo["sensor_id"] == 342
 
 
-async def test_sin_ningun_sensor_resuelto_no_se_reenvia(enviados, caplog) -> None:
-    evento = {"clasificacion_rf55": "DESVIACION_SIMPLE",
-              "variables_involucradas": [_variable("HUMEDAD_RELATIVA", "inexistente")]}
+async def test_lecturas_lora_sin_sensor_usan_la_raiz_de_la_telemetria(enviados, consultas) -> None:
+    """edge-firmware 0.3.0: la lectura LoRa no trae `sensor`. El evento se reenvía con el
+    mismo sensor que usa la ingesta de telemetría, y el mapa queda en None."""
+    evento = {"clasificacion_rf55": "DESVIACION_COMPUESTA", "severidad": "MODERADO",
+              "variables_involucradas": [_variable("temperatura_ambiente", None),
+                                         _variable("humedad_relativa", None)],
+              "metadata_edge": {"regla_aplicada": "ESTRES_TERMICO"}}
     await _publicar("sgpmp/EDGE-1/evento", evento)
+    [(_, cuerpo)] = enviados
+    assert cuerpo["sensor_id"] == 342
+    assert cuerpo["metadata_edge"]["sensores_por_variable"] == {
+        "temperatura_ambiente": None, "humedad_relativa": None}
+    assert consultas == [("dispositivo", "EDGE-1"), ("sensores", 12), ("primer_sensor", 12)]
+
+
+async def test_dispositivo_sin_sensores_no_se_reenvia(enviados, caplog) -> None:
+    evento = {"clasificacion_rf55": "DESVIACION_SIMPLE",
+              "variables_involucradas": [_variable("humedad_relativa", None)]}
+    await _publicar("sgpmp/EDGE-VACIO/evento", evento)
     assert enviados == []
-    assert "ninguna variable resolvió su sensor" in caplog.text
+    assert "dispositivo sin sensores" in caplog.text
 
 
 async def test_metadata_edge_gana_ante_colision(enviados, caplog) -> None:
     metadata = {"device_id_resuelto": "del-edge", "version_firmware": "0.3.0"}
     evento = {"clasificacion_rf55": "NORMAL", "metadata_edge": metadata,
-              "variables_involucradas": [_variable("TEMPERATURA_AMBIENTAL", "dht22_ambiente")]}
+              "variables_involucradas": [_variable("temperatura_ambiente", "dht22_ambiente")]}
     await _publicar("sgpmp/EDGE-1/evento", evento)
     [(_, cuerpo)] = enviados
     assert cuerpo["metadata_edge"]["device_id_resuelto"] == "del-edge"
     assert cuerpo["metadata_edge"]["version_firmware"] == "0.3.0"
-    assert cuerpo["metadata_edge"]["sensores_por_variable"] == {"TEMPERATURA_AMBIENTAL": 342}
+    assert cuerpo["metadata_edge"]["sensores_por_variable"] == {"temperatura_ambiente": 342}
     assert "se conserva lo del Edge" in caplog.text
     assert evento["metadata_edge"] == metadata  # el dict del Edge no se muta
 

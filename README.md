@@ -287,7 +287,10 @@ broker los resuelve antes de reenviar:
   del dispositivo (una consulta por evento). Sin match, esa variable queda en
   `null`; nunca se cae al primer sensor activo.
 - `sensor_id`: el de la variable primaria (la primera de la lista); si no
-  resolvió, el de la primera que sí. Si ninguna resolvió, se descarta.
+  resolvió, el de la primera que sí. Si ninguna resolvió (la lectura LoRa del
+  Gateway hoy no trae `sensor`), el de la misma regla que la ingesta de
+  telemetría, para apuntar al sensor donde quedó guardada la lectura. Un
+  dispositivo sin sensores se descarta.
 - El mapa va en `metadata_edge.sensores_por_variable` (el backend descarta los
   campos extra de cada variable) junto a `device_id_resuelto`. Lo que trae el
   Edge en `metadata_edge` no se toca: ante colisión gana el Edge.
