@@ -1,3 +1,13 @@
+## [0.4.0-rc.6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.5...v0.4.0-rc.6) (2026-10-27)
+
+### Features
+
+* **rf55:** resolver device_id y sensor_id por variable en el reenvio de eventos (BRK-12) ([da008a2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/da008a28c040d464cff246ee8f1161b7c296c07b))
+
+### Bug Fixes
+
+* **rf55:** sensor_id raiz del evento cuando las lecturas LoRa no traen sensor (BRK-12) ([2d91906](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/2d919067f97ba5fb5407991fdbf1dd7482ae7007))
+
 ## [0.4.0-rc.5](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.4...v0.4.0-rc.5) (2026-10-24)
 
 ### Features
