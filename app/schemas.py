@@ -1,11 +1,15 @@
+# | Fecha      | Nombre   | Que se hizo                                                       |
+# |------------|----------|-------------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: el heartbeat acepta metricas_buffer del Edge    |
 """Modelos de datos (payloads MQTT y contratos de la API)."""
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -47,6 +51,31 @@ class TelemetryPayload(BaseModel):
 _ESTADOS_BUFFER = {"I": "I", "A": "A", "L": "L", "INACTIVO": "I", "ACTIVO": "A", "LLENO": "L"}
 
 
+logger = logging.getLogger(__name__)
+
+
+class MetricasBuffer(BaseModel):
+    """RF-54 (TC-DIS-148): ocupación del buffer del Edge, la usa el panel del backend.
+
+    Mismo contrato que `MetricasBufferDTO` del backend (`extra='forbid'`): el backend
+    lee `modulo3.heartbeats.json_metricas_buffer` con esas reglas y responde 500 si el
+    JSON guardado no las cumple, así que acá no se deja pasar nada distinto.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    capacidad_total: float = Field(gt=0, allow_inf_nan=False)
+    capacidad_utilizada: float = Field(ge=0, allow_inf_nan=False)
+    ultimo_timestamp_pendiente: datetime | None = None
+    politica_buffer_activa: Literal["POLITICA_RECHAZO", "POLITICA_SOBRESCRITURA"]
+
+    @model_validator(mode="after")
+    def _utilizada_dentro_del_total(self) -> MetricasBuffer:
+        if self.capacidad_utilizada > self.capacidad_total:
+            raise ValueError("capacidad_utilizada no puede superar capacidad_total")
+        return self
+
+
 class SensorOperativo(BaseModel):
     # `sensor`: el mismo identificador que viaja en el campo `sensor` de la telemetría.
     sensor: str = Field(min_length=1)
@@ -73,6 +102,18 @@ class HeartbeatPayload(BaseModel):
     reloj_sincronizado: bool = False
     sensores_operativos: list[SensorOperativo] | None = None
     temperatura_dispositivo: float | None = Field(default=None, allow_inf_nan=False)  # °C
+    metricas_buffer: MetricasBuffer | None = None
+
+    @field_validator("metricas_buffer", mode="wrap")
+    @classmethod
+    def _metricas_invalidas_no_tumban_el_heartbeat(cls, valor, handler):
+        # Un reporte de buffer mal formado se descarta; el heartbeat (presencia,
+        # batería, pendientes) se guarda igual.
+        try:
+            return handler(valor)
+        except ValidationError as exc:
+            logger.warning("metricas_buffer inválidas, se descartan: %s", exc.errors(include_url=False))
+            return None
 
     @field_validator("estado_local_buffer")
     @classmethod

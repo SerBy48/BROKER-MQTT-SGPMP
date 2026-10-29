@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                       |
+# |------------|----------|-------------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: guarda metricas_buffer en json_metricas_buffer  |
 """Persistencia de ingesta IoT (schema modulo3).
 
 Usa las stored functions/procedures ya definidas en la base, delegando en la BD
@@ -68,46 +71,53 @@ COLUMNA_SENSORES_OPERATIVOS = "json_sensores_operativos"
 COLUMNA_TEMPERATURA_DISPOSITIVO = "temperatura_dispositivo"
 _COLUMNAS_D11 = (COLUMNA_SENSORES_OPERATIVOS, COLUMNA_TEMPERATURA_DISPOSITIVO)
 _REVISAR_D11_CADA_S = 600
+# TC-DIS-148 (RF-54): ocupación del buffer que lee el panel del backend (migración
+# b68127f54a01). Misma regla 2 que D11: si la columna no está, se omite.
+COLUMNA_METRICAS_BUFFER = "json_metricas_buffer"
 
 
-def _insert_heartbeat_sql(con_d11: bool) -> str:
+def _insert_heartbeat_sql(con_d11: bool, con_metricas: bool = False) -> str:
     columnas, valores = _COLUMNAS_HEARTBEAT, _VALORES_HEARTBEAT
     if con_d11:
         columnas += f", {COLUMNA_SENSORES_OPERATIVOS}, {COLUMNA_TEMPERATURA_DISPOSITIVO}"
         valores += ",\n    CAST(:sensores_operativos AS jsonb),\n    :temperatura_dispositivo"
+    if con_metricas:
+        columnas += f", {COLUMNA_METRICAS_BUFFER}"
+        valores += ",\n    CAST(:metricas_buffer AS jsonb)"
     return (
         f"INSERT INTO modulo3.heartbeats ({columnas}\n) VALUES ({valores}\n)\n"
         "RETURNING id_heartbeat"
     )
 
-
-_INSERT_HEARTBEAT_SQL = _insert_heartbeat_sql(con_d11=False)
-_INSERT_HEARTBEAT_D11_SQL = _insert_heartbeat_sql(con_d11=True)
-
 # Regla 2 del acuerdo: lo que sale antes que su par tolera su ausencia. Mientras
 # DB-03 no esté aplicada, el heartbeat se guarda como siempre (sin los dos campos).
 # Una vez que aparecen las columnas no se vuelve a preguntar.
 _d11: dict = {"disponible": False, "revisado_en": None}
+_metricas: dict = {"disponible": False, "revisado_en": None}
 
 
-async def _heartbeat_tiene_d11(session: AsyncSession) -> bool:
+async def _heartbeat_tiene(session: AsyncSession, cache: dict, columnas: tuple[str, ...], aviso: str) -> bool:
     ahora = time.monotonic()
-    revisado = _d11["revisado_en"]
-    if _d11["disponible"] or (revisado is not None and ahora - revisado < _REVISAR_D11_CADA_S):
-        return _d11["disponible"]
+    revisado = cache["revisado_en"]
+    if cache["disponible"] or (revisado is not None and ahora - revisado < _REVISAR_D11_CADA_S):
+        return cache["disponible"]
     resultado = await session.execute(
         text(
             "SELECT count(*) FROM information_schema.columns "
             "WHERE table_schema = 'modulo3' AND table_name = 'heartbeats' "
             "AND column_name = ANY(:columnas)"
         ),
-        {"columnas": list(_COLUMNAS_D11)},
+        {"columnas": list(columnas)},
     )
-    _d11["disponible"] = resultado.scalar_one() == len(_COLUMNAS_D11)
-    _d11["revisado_en"] = ahora
-    if not _d11["disponible"]:
-        logger.info("modulo3.heartbeats aún sin las columnas de D11 (DB-03): se omiten.")
-    return _d11["disponible"]
+    cache["disponible"] = resultado.scalar_one() == len(columnas)
+    cache["revisado_en"] = ahora
+    if not cache["disponible"]:
+        logger.info("modulo3.heartbeats aún sin %s: se omiten.", aviso)
+    return cache["disponible"]
+
+
+async def _heartbeat_tiene_d11(session: AsyncSession) -> bool:
+    return await _heartbeat_tiene(session, _d11, _COLUMNAS_D11, "las columnas de D11 (DB-03)")
 
 _INSERT_TRANSMISION_SQL = """
 INSERT INTO modulo3.transmisiones_mqtt (
@@ -190,7 +200,12 @@ async def insert_heartbeat(
         parametros["temperatura_dispositivo"] = payload.temperatura_dispositivo
     elif payload.sensores_operativos is not None or payload.temperatura_dispositivo is not None:
         logger.debug("Heartbeat con campos de D11 y BD sin DB-03: se descartan esos campos.")
-    sql = _INSERT_HEARTBEAT_D11_SQL if con_d11 else _INSERT_HEARTBEAT_SQL
+    con_metricas = payload.metricas_buffer is not None and await _heartbeat_tiene(
+        session, _metricas, (COLUMNA_METRICAS_BUFFER,), "json_metricas_buffer (b68127f54a01)"
+    )
+    if con_metricas:
+        parametros["metricas_buffer"] = json.dumps(payload.metricas_buffer.model_dump(mode="json"))
+    sql = _insert_heartbeat_sql(con_d11, con_metricas)
     result = await session.execute(text(sql), parametros)
     return result.scalar_one()
 
