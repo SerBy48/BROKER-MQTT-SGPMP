@@ -1,3 +1,9 @@
+## [0.4.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.8...v0.4.0-rc.9) (2026-10-29)
+
+### Bug Fixes
+
+* **rf53:** declarar el usuario de servicio en cada transacción bajo FORCE RLS ([a92e054](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a92e054d224edde7329dbb231c1a5ba536aed624)), closes [#808](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/808)
+
 ## [0.4.0-rc.8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.7...v0.4.0-rc.8) (2026-10-29)
 
 ### Bug Fixes
