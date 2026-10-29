@@ -1,3 +1,9 @@
+## [0.4.0-rc.8](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.7...v0.4.0-rc.8) (2026-10-29)
+
+### Bug Fixes
+
+* **rf53:** avisar al arrancar si falta BACKEND_URL o BROKER_SERVICE_TOKEN (BRK-02) ([f4d480a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/f4d480a4e2c8cc1b4b785dcad7d5c7e1c91b4dcc))
+
 ## [0.4.0-rc.7](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.6...v0.4.0-rc.7) (2026-10-29)
 
 ### Features
