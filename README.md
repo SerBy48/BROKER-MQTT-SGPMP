@@ -270,12 +270,30 @@ se ignora.
 | Topic | Endpoint del backend | Cuerpo |
 |---|---|---|
 | `vision` | `POST /iot/telemetria/vision` | el sobre de D4 tal cual + `serial` |
-| `evento` | `POST /iot/eventos-edge` | el evento RF-55 tal cual + `serial` |
+| `evento` | `POST /iot/eventos-edge` | el evento RF-55 + `serial`, `device_id`, `sensor_id` (ver abajo) |
 | `ota/<evento>` | `POST /prediccion/ota/reportes` | `serial`, `id_despliegue_ota`, `componente`, `evento` y el resto en `detalle` |
 
 La ACL de cada nodo cubre esos topics de su serial; los reportes OTA van uno
 por uno (sin comodín), así que el nodo no puede publicar en `ota/notify` ni en
 un `ota/<evento>` fuera del contrato.
+
+Identidad del evento Edge (BRK-12, RF-55). El backend exige `device_id` y
+`sensor_id` (PKs de modulo9) y el firmware solo conoce seriales, así que el
+broker los resuelve antes de reenviar:
+
+- `device_id`: el del `serial` del topic. Serial no registrado → se descarta
+  con log, sin llamar al backend.
+- Cada `variables_involucradas[].sensor` se busca en `modulo9.sensores.nombre`
+  del dispositivo (una consulta por evento). Sin match, esa variable queda en
+  `null`; nunca se cae al primer sensor activo.
+- `sensor_id`: el de la variable primaria (la primera de la lista); si no
+  resolvió, el de la primera que sí. Si ninguna resolvió (la lectura LoRa del
+  Gateway hoy no trae `sensor`), el de la misma regla que la ingesta de
+  telemetría, para apuntar al sensor donde quedó guardada la lectura. Un
+  dispositivo sin sensores se descarta.
+- El mapa va en `metadata_edge.sensores_por_variable` (el backend descarta los
+  campos extra de cada variable) junto a `device_id_resuelto`. Lo que trae el
+  Edge en `metadata_edge` no se toca: ante colisión gana el Edge.
 
 Prioridad bajo saturación (BRK-09, RF-53 E15). Los mensajes pasan por una cola
 de prioridad: control (`status`, `ota/*`) antes que críticos (heartbeat, eventos
