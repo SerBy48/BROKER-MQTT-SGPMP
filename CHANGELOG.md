@@ -1,3 +1,9 @@
+## [0.4.0-rc.7](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.6...v0.4.0-rc.7) (2026-10-29)
+
+### Features
+
+* **rf54-heartbeat:** guardar metricas_buffer del Edge en json_metricas_buffer (TC-DIS-148) ([acbf96f](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/acbf96f084f6e969499256ceeddcf6a808ea2bcc))
+
 ## [0.4.0-rc.6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.5...v0.4.0-rc.6) (2026-10-27)
 
 ### Features
