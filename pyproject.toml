@@ -29,7 +29,7 @@ dev = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["app"]
+packages = ["app", "motor_ia"]
 
 [tool.ruff]
 line-length = 100
