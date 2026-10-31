@@ -1,3 +1,13 @@
+## [0.4.0-rc.12](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.11...v0.4.0-rc.12) (2026-10-31)
+
+### Features
+
+* **rf17-motor-ia:** el modelo individual usa los rangos de M09 que manda el backend ([a749b97](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a749b971407eb70cc86258a3b4595ef595c554b7))
+
+### Bug Fixes
+
+* **rf17-motor-ia:** resolver cada banda por separado y no usar valor_min-valor_max como plausible ([1a8e633](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/1a8e6334c3b37fa89145bcbf35e45cd89bc8f79a))
+
 ## [0.4.0-rc.11](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.10...v0.4.0-rc.11) (2026-10-31)
 
 ### Features
