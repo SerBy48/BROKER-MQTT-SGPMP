@@ -2,7 +2,9 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: esqueleto del motor de inferencia M04 (M1)                |
 # | 2026-10-30 | Arekkazu | RF-66: inferencia ET-02 y entrega de resultados al backend (M2)  |
+# | 2026-10-31 | Arekkazu | RF-17 C3: rangos de M09 en la inferencia, con respaldo a ET-02   |
 # | 2026-10-31 | SerBy48  | RF-66: 403/404, timestamps mixtos, lecturas inválidas y reloj    |
+# | 2026-10-31 | SerBy48  | RF-17 C3: bandas por separado y plausible apagada                |
 """Motor de inferencia M04: arranque, token, inferencia ET-02 y entrega al backend.
 
 Requiere el extra ``[motor-ia]`` (onnxruntime, numpy, pandas); sin él se omite.
@@ -24,7 +26,7 @@ pytest.importorskip("onnxruntime")
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
-from motor_ia import et02  # noqa: E402
+from motor_ia import et02, individual  # noqa: E402
 from motor_ia.backend import normalizar_url_base  # noqa: E402
 from motor_ia.individual import (  # noqa: E402
     CatalogoInvalidoError,
@@ -152,6 +154,146 @@ def test_inferencia_igual_a_la_referencia_et02(caso: dict) -> None:
     contrato, decision = inferir(modelo, caso["lecturas"])
     assert {k: contrato[k] for k in caso["esperado"]} == caso["esperado"]
     assert decision["modo_sombra"] is True  # modelo SINTETICO: calcula y registra, no alerta
+
+
+# ── C3: rangos de M09 · RF-17 ────────────────────────────────────────────
+
+# La forma exacta que envía el backend (ventana_inferencia_m02_adapter._rangos).
+RANGOS_M09_AMPLIOS = {
+    "temperatura_corporal": {"sano": [36.0, 42.0], "plausible": [35.0, 43.0]},
+    "frecuencia_cardiaca": {"sano": [30.0, 150.0], "plausible": [30.0, 160.0]},
+}
+SOLO_ET02 = {"sano": "ET-02", "plausible": "ET-02"}
+
+
+def _plausible_m09_activa(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(individual, "PLAUSIBLE_M09_HABILITADA", True)
+
+
+def test_rangos_m09_cambian_el_rango_sano_y_no_el_modelo() -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    propio, _ = inferir(modelo, SEPTICEMIA["lecturas"])
+    m09, _ = inferir(modelo, SEPTICEMIA["lecturas"], RANGOS_M09_AMPLIOS)
+    # Con la banda de ET-02 (38.0–39.5 °C) la fiebre sale de lo sano; con la de M09 (36–42), no.
+    assert propio["variables_fuera_rango_sano"] == ["temperatura_corporal"]
+    assert m09["variables_fuera_rango_sano"] == []
+    assert m09["fuente_rangos_especie"]["temperatura_corporal"] == {
+        "sano": "M09",
+        "plausible": "ET-02",
+    }
+    assert propio["fuente_rangos_especie"]["temperatura_corporal"] == SOLO_ET02
+    # En operación el rango sano no filtra: el modelo ve las mismas lecturas.
+    assert (m09["id_especie"], m09["clase_predicha"], m09["probabilidades"]) == (
+        "BOVINO",
+        propio["clase_predicha"],
+        propio["probabilidades"],
+    )
+
+
+def test_plausible_del_umbral_no_descarta_lecturas_validas() -> None:
+    """Umbral normal 38–39.5, precaución 39.5–40.5, crítico 40.5–42: a 35.8 °C el Edge alerta."""
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    lecturas = copy.deepcopy(NORMAL["lecturas"])
+    for lectura in lecturas:
+        if lectura["variable"] == "temperatura_corporal":
+            lectura["valor"] -= 2.5
+    rangos = {"temperatura_corporal": {"sano": [38.0, 39.5], "plausible": [38.0, 42.0]}}
+    propio, _ = inferir(modelo, lecturas)
+    m09, _ = inferir(modelo, lecturas, rangos)
+    assert m09["eventos_regla_dura_rf17"] == []
+    assert "temperatura_corporal" not in m09["variables_ausentes"]
+    assert m09["fuente_rangos_especie"]["temperatura_corporal"]["plausible"] == "ET-02"
+    assert (m09["clase_predicha"], m09["probabilidades"]) == (
+        propio["clase_predicha"],
+        propio["probabilidades"],
+    )
+
+
+def test_plausible_de_m09_activa_descarta_lecturas_como_regla_dura(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _plausible_m09_activa(monkeypatch)
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    # La fiebre del caso (~40–40.6 °C) cabe en la plausible de ET-02 (35–43) pero no en esta.
+    rangos = {"temperatura_corporal": {"sano": [38.0, 39.0], "plausible": [37.0, 40.0]}}
+    propio, _ = inferir(modelo, SEPTICEMIA["lecturas"])
+    with caplog.at_level(logging.WARNING):
+        m09, _ = inferir(modelo, SEPTICEMIA["lecturas"], rangos)
+    assert propio["eventos_regla_dura_rf17"] == []
+    assert m09["eventos_regla_dura_rf17"]
+    assert {e["rango_plausible_especie"][1] for e in m09["eventos_regla_dura_rf17"]} == {40.0}
+    assert m09["fuente_rangos_especie"]["temperatura_corporal"] == {
+        "sano": "M09",
+        "plausible": "M09",
+    }
+    assert "fuera de la banda plausible en ['temperatura_corporal']" in caplog.text
+
+
+def test_plausible_de_m09_activa_con_la_forma_del_backend_no_cambia_el_modelo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _plausible_m09_activa(monkeypatch)
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    propio, _ = inferir(modelo, SEPTICEMIA["lecturas"])
+    m09, _ = inferir(modelo, SEPTICEMIA["lecturas"], RANGOS_M09_AMPLIOS)
+    assert m09["eventos_regla_dura_rf17"] == []
+    assert m09["probabilidades"] == propio["probabilidades"]
+
+
+@pytest.mark.parametrize(
+    ("rango", "esperado"),
+    [
+        ({"plausible": [35.0, 42.0]}, {"sano": "ET-02", "plausible": "M09"}),
+        ({"sano": [38.0, 39.0], "plausible": "x"}, {"sano": "M09", "plausible": "ET-02"}),
+        ({"sano": "x", "plausible": [35.0, 42.0]}, {"sano": "ET-02", "plausible": "M09"}),
+        ({"sano": [37.0, 41.0], "plausible": [38.0, 40.0]}, SOLO_ET02),
+        ({"plausible": [38.5, 39.0]}, SOLO_ET02),
+    ],
+    ids=["solo_plausible", "plausible_mala", "sano_malo", "invariante", "sano_propio_no_cabe"],
+)
+def test_con_plausible_activa_cada_banda_se_resuelve_por_separado(
+    rango: dict, esperado: dict, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _plausible_m09_activa(monkeypatch)
+    _, fuentes = individual.especie_con_rangos_m09("BOVINO", {"temperatura_corporal": rango})
+    assert fuentes["temperatura_corporal"] == esperado
+
+
+@pytest.mark.parametrize(
+    "rangos",
+    [
+        {"temperatura_corporal": {"sano": [39.5, 38.0], "plausible": [35.0, 43.0]}},
+        {"temperatura_corporal": {"sano": [38.0, float("inf")]}},
+        {"temperatura_corporal": {"sano": "38-39"}},
+        {"temperatura_corporal": [38.0, 39.0]},
+        {"temperatura_corporal": {"sano": [30.0, 50.0]}},
+        {"temperatura_corporal": {"plausible": [35.0, 43.0]}},
+        {"actividad_indice": {"sano": [0.2, 0.3], "plausible": [0.0, 0.5]}},
+        None,
+    ],
+    ids=[
+        "invertido",
+        "infinito",
+        "mal_formado",
+        "no_dict",
+        "fuera_de_plausible",
+        "solo_plausible",
+        "actividad",
+        "sin_rangos",
+    ],
+)
+def test_rango_invalido_usa_el_de_et02(rangos) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    contrato, _ = inferir(modelo, SEPTICEMIA["lecturas"], rangos)
+    assert contrato["fuente_rangos_especie"]["temperatura_corporal"] == SOLO_ET02
+    assert {k: contrato[k] for k in SEPTICEMIA["esperado"]} == SEPTICEMIA["esperado"]
+
+
+def test_rangos_aplicados_quedan_en_el_log(caplog: pytest.LogCaptureFixture) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    with caplog.at_level(logging.INFO, logger="motor_ia.individual"):
+        inferir(modelo, SEPTICEMIA["lecturas"], RANGOS_M09_AMPLIOS)
+    assert "C3: activo 885: rangos=" in caplog.text and "'sano': 'M09'" in caplog.text
 
 
 def test_timestamps_en_formatos_mixtos_dan_el_mismo_resultado() -> None:
@@ -314,6 +456,25 @@ def test_infiere_una_vez_por_activo_y_entrega_al_backend() -> None:
     ((url, auth, cuerpo),) = backend.recibidos
     assert url == f"{BACKEND}/prediccion/inferencias" and auth == f"Bearer {TOKEN}"
     assert (cuerpo["id_paquete_inferencia"], cuerpo["nivel_riesgo"]) == (2, 3)
+
+
+def test_paquete_con_rangos_del_backend_registra_el_mismo_resultado() -> None:
+    backend = _BackendFalso()
+    r = _con_modelos(backend).post(
+        "/v1/paquetes",
+        headers=AUTH,
+        json=_lote(
+            {
+                "id_paquetes_inferencia": 1,
+                "id_activo_biologico": 885,
+                "lecturas": SEPTICEMIA["lecturas"],
+                "rangos_especie": RANGOS_M09_AMPLIOS,
+            }
+        ),
+    )
+    assert r.status_code == 200 and len(r.json()["resultados_registrados"]) == 1
+    ((_, _, cuerpo),) = backend.recibidos
+    assert cuerpo["nivel_riesgo"] == 3 and "fuente_rangos_especie" not in cuerpo
 
 
 def test_backend_caido_responde_503_para_que_reenvie() -> None:
