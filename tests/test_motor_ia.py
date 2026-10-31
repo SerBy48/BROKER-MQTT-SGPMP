@@ -52,6 +52,6 @@ def test_paquetes_cuerpo_invalido_422(cliente: TestClient, cuerpo: dict) -> None
 
 
 def test_root_path_para_traefik() -> None:
-    settings = MotorIASettings(iot_inferencia_m04_token=TOKEN, motor_ia_root_path="/model-ia-test")
+    settings = MotorIASettings(iot_inferencia_m04_token=TOKEN, motor_ia_root_path="/motor-ia-test")
     app = crear_app(settings)
-    assert app.root_path == "/model-ia-test"
+    assert app.root_path == "/motor-ia-test"

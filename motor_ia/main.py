@@ -6,7 +6,7 @@
 Vive en este repo pero no comparte proceso con ``app``: una inferencia en CPU
 bloquearía el bucle de aiomqtt, y las dependencias de ML no deben inflar la
 imagen del broker. Se despliega como servicio propio detrás de Traefik
-(``api.inmero.co/model-ia[-test|-dev]`` con Strip Path; el HTTPS lo pone Dokploy).
+(``api.inmero.co/motor-ia[-test|-dev]`` con Strip Path; el HTTPS lo pone Dokploy).
 
 Arranque::
 
@@ -17,7 +17,7 @@ Variables:
 - ``IOT_INFERENCIA_M04_TOKEN`` (obligatoria): el mismo secreto que tiene el
   backend. Con él el backend llama a ``/v1/paquetes`` y el motor entrega sus
   resultados en ``POST /prediccion/inferencias`` del backend. Sin él no arranca.
-- ``MOTOR_IA_ROOT_PATH``: prefijo que quita Traefik (ej. ``/model-ia-test``),
+- ``MOTOR_IA_ROOT_PATH``: prefijo que quita Traefik (ej. ``/motor-ia-test``),
   solo para que Swagger arme bien sus URL.
 
 Estado (M1): todavía no carga modelos. ``/v1/paquetes`` responde 503
