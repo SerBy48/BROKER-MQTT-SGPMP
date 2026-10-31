@@ -2,6 +2,7 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: esqueleto del motor de inferencia M04 (M1)                |
 # | 2026-10-30 | Arekkazu | RF-66: inferencia individual ET-02 y entrega al backend (M2)     |
+# | 2026-10-31 | SerBy48  | RF-66: log visible bajo uvicorn y activo inválido no tumba lote  |
 """Motor de inferencia M04 (``motor-ia``): proceso aparte del gateway MQTT.
 
 Vive en este repo pero no comparte proceso con ``app``: una inferencia en CPU
@@ -24,7 +25,7 @@ Variables:
 
 El motor responde en cualquier dominio (no valida el Host) y en la raíz o detrás de un prefijo
 que quite el proxy (Strip Path). Para que Swagger arme bien sus URL detrás del prefijo:
-``uvicorn ... --root-path /model-ia-test``.
+``uvicorn ... --root-path /motor-ia-test``.
 """
 
 from __future__ import annotations
@@ -65,6 +66,8 @@ class LotePaquetes(BaseModel):
 def crear_app(
     settings: MotorIASettings | None = None, transport_backend: httpx.BaseTransport | None = None
 ) -> FastAPI:
+    # uvicorn solo configura sus propios loggers: sin esto los INFO del motor no salen.
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(name)s: %(message)s")
     settings = settings or MotorIASettings()
     if not settings.iot_inferencia_m04_token:
         raise RuntimeError("Falta IOT_INFERENCIA_M04_TOKEN: el motor no arranca sin token.")
@@ -130,8 +133,9 @@ def crear_app(
         # ventana del paquete más reciente del lote (llegan en orden cronológico).
         ultimo: dict[int, dict] = {}
         for p in lote.paquetes:
-            if p.get("id_activo_biologico") in modelos:
-                ultimo[p["id_activo_biologico"]] = p
+            id_activo = p.get("id_activo_biologico")
+            if isinstance(id_activo, int) and id_activo in modelos:
+                ultimo[id_activo] = p
 
         registrados, rechazados, sin_resultado = [], 0, 0
         try:

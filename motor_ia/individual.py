@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: catálogo de modelos e inferencia individual (M2)          |
+# | 2026-10-31 | SerBy48  | RF-66: timestamps uniformes, lecturas inválidas y log sin result |
 """Inferencia individual (ET-02) por activo y su conversión a la Salida de RF-66.
 
 Catálogo local de modelos (``MOTOR_IA_DIR_MODELOS/catalogo.json``) mientras no existan
@@ -18,8 +19,10 @@ registrada en RF-69 de ese ambiente. Si el hash del ``.onnx`` no coincide con
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +30,8 @@ from motor_ia import et02
 
 #: Para que el id del resultado sea el mismo si el backend reenvía el lote (B1 lo deduplica).
 _ESPACIO_IDS = uuid.UUID("6f1c2a9e-3b7d-4e55-9a0c-5d8e2f4b7a31")
+
+logger = logging.getLogger(__name__)
 
 
 class CatalogoInvalidoError(RuntimeError):
@@ -79,6 +84,18 @@ def cargar_catalogo(directorio: str) -> dict[int, ModeloAnimal]:
     return modelos
 
 
+def _timestamp_uniforme(valor: str) -> str:
+    """ISO 8601 en UTC, siempre con microsegundos.
+
+    ``isoformat()`` los omite cuando valen cero, y ET-02 fija el formato de toda la serie con la
+    primera lectura: una sola hora en el otro formato anula la ventana. Sin zona se toma como UTC.
+    """
+    ts = datetime.fromisoformat(valor)
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=UTC)
+    return ts.astimezone(UTC).isoformat(timespec="microseconds")
+
+
 def lecturas_a_filas(lecturas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Formato largo del backend (una fila por lectura) → filas con las tres variables de ET-02.
 
@@ -89,7 +106,10 @@ def lecturas_a_filas(lecturas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for lectura in lecturas:
         if lectura.get("variable") not in et02.VARIABLES:
             continue
-        fila = {"timestamp": lectura["timestamp"], **{v: None for v in et02.VARIABLES}}
+        fila = {
+            "timestamp": _timestamp_uniforme(lectura["timestamp"]),
+            **{v: None for v in et02.VARIABLES},
+        }
         fila[lectura["variable"]] = lectura["valor"]
         fila["apto_para_ia"] = lectura.get("apto_para_ia")
         filas.append(fila)
@@ -98,17 +118,33 @@ def lecturas_a_filas(lecturas: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def inferir(modelo: ModeloAnimal, lecturas: list[dict[str, Any]]) -> tuple[dict, dict] | None:
     """(contrato ET-02, decisión de la Tabla 2.4) de la última ventana, o None si no hay inferencia
-    utilizable (sin lecturas suficientes, sin línea base vigente, error de datos)."""
+    utilizable (sin lecturas suficientes, sin línea base vigente, error de datos). Sin resultado el
+    paquete igual queda ENVIADO en el backend, así que el motivo se deja en el log."""
+    id_activo = modelo.id_activo_biologico
+    try:
+        filas = lecturas_a_filas(lecturas)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        # Una ventana mal formada no debe tumbar el lote: se reintentaría con los demás activos.
+        logger.warning("RF-66: activo %s sin resultado: lecturas inválidas (%r)", id_activo, exc)
+        return None
+    if not filas:
+        logger.warning("RF-66: activo %s sin resultado: sin lecturas de ET-02", id_activo)
+        return None
     paquete = {
         "id_animal": modelo.linea_base.id_animal,
         "id_especie": modelo.linea_base.especie,
-        "lecturas": lecturas_a_filas(lecturas),
+        "lecturas": filas,
     }
-    if not paquete["lecturas"]:
-        return None
     contrato = et02.inferir_estado_individual(paquete, modelo.linea_base, modelo.artefacto)
     decision = et02.aplicar_reglas_rf66(contrato)
     if contrato.get("estado") != "OK" or not decision["utilizable"]:
+        logger.warning(
+            "RF-66: activo %s sin resultado: estado=%s, motivos=%s, detalle=%s",
+            id_activo,
+            contrato.get("estado"),
+            decision["motivos"],
+            contrato.get("detalle"),
+        )
         return None
     return contrato, decision
 
@@ -124,7 +160,17 @@ def a_resultado_rf66(
     clases de riesgo alto (hoy SEPTICEMIA) → 3 Alto, cualquier otra patología → 2 Moderado. El
     nivel 1 (Bajo) no se emite. ``probabilidad_riesgo`` agrupa las probabilidades igual.
     La Restricción 6b (umbral_riesgo_alto de RF-65) no se aplica: en sombra no alerta.
+
+    TODO(S4): la Tabla 2.4 dice que sin temperatura no se evalúan septicemia ni síndrome
+    respiratorio, pero qué nivel y patología enviar entonces lo define Análisis. Por ahora el
+    resultado no cambia, viaja con ``contexto_incompleto`` y queda el aviso en el log.
     """
+    if contrato["clase_predicha"] in decision["hipotesis_no_evaluables"]:
+        logger.warning(
+            "RF-66: activo %s: %s predicha sin temperatura; la Tabla 2.4 no la considera evaluable",
+            modelo.id_activo_biologico,
+            contrato["clase_predicha"],
+        )
     p = contrato["probabilidades"]
     clases_alto = et02.CONFIG["riesgo_alto"]["clases"]
     alto = sum(p[c] for c in clases_alto)
