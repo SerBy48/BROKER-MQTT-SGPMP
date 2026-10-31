@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: catálogo de modelos e inferencia individual (M2)          |
+# | 2026-10-31 | Arekkazu | RF-17 C3: rangos sano/plausible de M09 en lugar de los de ET-02  |
 """Inferencia individual (ET-02) por activo y su conversión a la Salida de RF-66.
 
 Catálogo local de modelos (``MOTOR_IA_DIR_MODELOS/catalogo.json``) mientras no existan
@@ -17,7 +18,9 @@ registrada en RF-69 de ese ambiente. Si el hash del ``.onnx`` no coincide con
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import logging
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +30,11 @@ from motor_ia import et02
 
 #: Para que el id del resultado sea el mismo si el backend reenvía el lote (B1 lo deduplica).
 _ESPACIO_IDS = uuid.UUID("6f1c2a9e-3b7d-4e55-9a0c-5d8e2f4b7a31")
+
+#: Variables cuyas bandas gobierna RF-17. La actividad es un índice 0–1 por construcción (regla 1 de C3).
+VARIABLES_CON_RANGO_M09 = ("frecuencia_cardiaca", "temperatura_corporal")
+
+logger = logging.getLogger(__name__)
 
 
 class CatalogoInvalidoError(RuntimeError):
@@ -96,17 +104,69 @@ def lecturas_a_filas(lecturas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return filas
 
 
-def inferir(modelo: ModeloAnimal, lecturas: list[dict[str, Any]]) -> tuple[dict, dict] | None:
+def especie_con_rangos_m09(especie: str, rangos: Any) -> tuple[str, dict[str, str]]:
+    """Punto C3 de ET-02: (clave de ``et02.ESPECIES`` a usar, fuente del rango por variable).
+
+    ``rangos`` es el ``rangos_especie`` del paquete: ``{variable: {"sano": [min, max],
+    "plausible": [min, max]}}`` desde M09 · RF-17. Una variable sin rango, mal formada o que
+    rompe el invariante ``plausible ⊇ sano`` conserva el valor de ET-02 (ET-02 lo exige por
+    assert; aquí se registra y se sigue). ``et02.py`` es copia literal y no se edita: la
+    especie con rangos de M09 se registra como una clave más del diccionario.
+    """
+    fuentes = {var: "ET-02" for var in VARIABLES_CON_RANGO_M09}
+    if not isinstance(rangos, dict) or especie not in et02.ESPECIES:
+        return especie, fuentes
+    aplicados: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
+    for var in VARIABLES_CON_RANGO_M09:
+        if var not in rangos:
+            continue
+        try:
+            s_min, s_max = (float(x) for x in rangos[var]["sano"])
+            p_min, p_max = (float(x) for x in rangos[var]["plausible"])
+        except (KeyError, TypeError, ValueError):
+            logger.warning("C3: rango de %s mal formado para %s, se usa el de ET-02: %r", var, especie, rangos[var])
+            continue
+        if not (p_min <= s_min < s_max <= p_max):
+            logger.warning(
+                "C3: el rango de %s para %s no cumple plausible ⊇ sano (sano %s–%s, plausible %s–%s); "
+                "se usa el de ET-02.", var, especie, s_min, s_max, p_min, p_max,
+            )
+            continue
+        aplicados[var] = ((s_min, s_max), (p_min, p_max))
+        fuentes[var] = "M09"
+    if not aplicados:
+        return especie, fuentes
+    clave = f"{especie}|M09|{json.dumps(aplicados, sort_keys=True)}"
+    if clave not in et02.ESPECIES:
+        # ponytail: una entrada por combinación de rangos vista; crece solo si M09 cambia los umbrales.
+        def_especie = json.loads(json.dumps(et02.ESPECIES[especie]))
+        for var, (sano, plausible) in aplicados.items():
+            def_especie["rango_sano"][var] = sano
+            def_especie["rango_plausible"][var] = plausible
+            def_especie["rango_sano_fuente"][var] = def_especie["rango_plausible_fuente"][var] = "M09 · RF-17"
+        et02.ESPECIES.setdefault(clave, def_especie)
+    return clave, fuentes
+
+
+def inferir(
+    modelo: ModeloAnimal, lecturas: list[dict[str, Any]], rangos_especie: Any = None
+) -> tuple[dict, dict] | None:
     """(contrato ET-02, decisión de la Tabla 2.4) de la última ventana, o None si no hay inferencia
-    utilizable (sin lecturas suficientes, sin línea base vigente, error de datos)."""
+    utilizable (sin lecturas suficientes, sin línea base vigente, error de datos).
+
+    ``rangos_especie`` (opcional) son las bandas de M09 · RF-17 que manda el backend (C3)."""
+    especie = modelo.linea_base.especie
+    clave, fuentes = especie_con_rangos_m09(especie, rangos_especie)
     paquete = {
         "id_animal": modelo.linea_base.id_animal,
-        "id_especie": modelo.linea_base.especie,
+        "id_especie": clave,
         "lecturas": lecturas_a_filas(lecturas),
     }
     if not paquete["lecturas"]:
         return None
-    contrato = et02.inferir_estado_individual(paquete, modelo.linea_base, modelo.artefacto)
+    linea_base = dataclasses.replace(modelo.linea_base, especie=clave)
+    contrato = et02.inferir_estado_individual(paquete, linea_base, modelo.artefacto)
+    contrato.update(id_especie=especie, fuente_rangos_especie=fuentes)
     decision = et02.aplicar_reglas_rf66(contrato)
     if contrato.get("estado") != "OK" or not decision["utilizable"]:
         return None
