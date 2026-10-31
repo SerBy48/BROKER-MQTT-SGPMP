@@ -1,3 +1,9 @@
+## [0.4.0-rc.10](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.9...v0.4.0-rc.10) (2026-10-31)
+
+### Features
+
+* **rf66:** esqueleto del motor de inferencia M04 (motor-ia) como servicio aparte ([35e7390](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/35e7390c3935e327eba0cc6553e8c33dac77c34f))
+
 ## [0.4.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.8...v0.4.0-rc.9) (2026-10-29)
 
 ### Bug Fixes
