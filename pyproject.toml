@@ -22,6 +22,14 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# RF-66: solo la imagen del motor de inferencia (motor_ia/) los instala, con las versiones
+# fijadas de los entregables de ET-02 v5. El broker no los necesita.
+# numpy==2.5.3 exige Python 3.12 o superior: la imagen del motor usa 3.13 y el broker sigue en 3.11.
+motor-ia = [
+    "onnxruntime==1.29.0",
+    "numpy==2.5.3",
+    "pandas==3.0.5",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
