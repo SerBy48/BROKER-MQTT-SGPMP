@@ -60,7 +60,8 @@ class MotorIASettings(BaseSettings):
 class LotePaquetes(BaseModel):
     # Contrato IA-1 v1 (decisión D-B): el backend envía cada paquete de RF-56 con
     # ``id_activo_biologico``, ``lecturas`` (ventana del activo en formato largo) y, si la especie
-    # tiene umbral en M09 · RF-17, ``rangos_especie`` (punto C3 de ET-02). Se aceptan
+    # tiene umbral en M09 · RF-17, ``rangos_especie`` (punto C3 de ET-02; ``plausible`` aún no se
+    # usa, ver ``individual.PLAUSIBLE_M09_HABILITADA``). Se aceptan
     # campos de más para no romper si el backend agrega contexto.
     paquetes: list[dict[str, Any]] = Field(min_length=1, max_length=500)
 

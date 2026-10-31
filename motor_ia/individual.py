@@ -3,6 +3,7 @@
 # | 2026-10-30 | Arekkazu | RF-66: catálogo de modelos e inferencia individual (M2)          |
 # | 2026-10-31 | Arekkazu | RF-17 C3: rangos sano/plausible de M09 en lugar de los de ET-02  |
 # | 2026-10-31 | SerBy48  | RF-66: timestamps uniformes, lecturas inválidas y log sin result |
+# | 2026-10-31 | SerBy48  | RF-17 C3: banda plausible de M09 apagada hasta tener campos propios |
 """Inferencia individual (ET-02) por activo y su conversión a la Salida de RF-66.
 
 Catálogo local de modelos (``MOTOR_IA_DIR_MODELOS/catalogo.json``) mientras no existan
@@ -22,6 +23,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import logging
+import math
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -33,8 +35,13 @@ from motor_ia import et02
 #: Para que el id del resultado sea el mismo si el backend reenvía el lote (B1 lo deduplica).
 _ESPACIO_IDS = uuid.UUID("6f1c2a9e-3b7d-4e55-9a0c-5d8e2f4b7a31")
 
-#: Variables cuyas bandas gobierna RF-17. La actividad es un índice 0–1 por construcción (regla 1 de C3).
+#: Variables cuyas bandas gobierna RF-17. La actividad es un índice 0–1 por construcción.
 VARIABLES_CON_RANGO_M09 = ("frecuencia_cardiaca", "temperatura_corporal")
+
+#: TODO(C3): activar cuando M09 · RF-17 tenga campos propios para la banda plausible y el backend
+#: los envíe. Hoy ``plausible`` es ``valor_min``–``valor_max`` del umbral: fuera de ese rango el
+#: Edge y RF-58 alertan porque la lectura es válida, y ET-02 la descartaría como imposible.
+PLAUSIBLE_M09_HABILITADA = False
 
 logger = logging.getLogger(__name__)
 
@@ -121,46 +128,74 @@ def lecturas_a_filas(lecturas: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return filas
 
 
-def especie_con_rangos_m09(especie: str, rangos: Any) -> tuple[str, dict[str, str]]:
-    """Punto C3 de ET-02: (clave de ``et02.ESPECIES`` a usar, fuente del rango por variable).
+def _banda_m09(especie: str, var: str, rango: Any, banda: str) -> tuple[float, float] | None:
+    """``(min, max)`` de una banda de ``rangos_especie``. None si no vino o no sirve (con aviso)."""
+    try:
+        minimo, maximo = (float(x) for x in rango[banda])
+    except KeyError:
+        return None
+    except (TypeError, ValueError):
+        logger.warning("C3: banda %s de %s mal formada para %s: %r", banda, var, especie, rango)
+        return None
+    if not (math.isfinite(minimo) and math.isfinite(maximo) and minimo < maximo):
+        logger.warning("C3: banda %s de %s inválida para %s: %r", banda, var, especie, rango)
+        return None
+    return minimo, maximo
+
+
+def especie_con_rangos_m09(
+    especie: str, rangos: Any
+) -> tuple[str, dict[str, dict[str, str]]]:
+    """Punto C3 de ET-02: (clave de ``et02.ESPECIES`` a usar, fuente de cada banda por variable).
 
     ``rangos`` es el ``rangos_especie`` del paquete: ``{variable: {"sano": [min, max],
-    "plausible": [min, max]}}`` desde M09 · RF-17. Una variable sin rango, mal formada o que
-    rompe el invariante ``plausible ⊇ sano`` conserva el valor de ET-02 (ET-02 lo exige por
-    assert; aquí se registra y se sigue). ``et02.py`` es copia literal y no se edita: la
+    "plausible": [min, max]}}``. Cada banda se resuelve por separado: la que no llega o no sirve
+    conserva el valor de ET-02, y ``plausible`` solo se lee con ``PLAUSIBLE_M09_HABILITADA``. Si el
+    resultado rompe el invariante ``plausible ⊇ sano``, la variable entera conserva ET-02 (ET-02 lo
+    exige por assert; aquí se registra y se sigue). ``et02.py`` es copia literal y no se edita: la
     especie con rangos de M09 se registra como una clave más del diccionario.
     """
-    fuentes = {var: "ET-02" for var in VARIABLES_CON_RANGO_M09}
+    fuentes = {var: {"sano": "ET-02", "plausible": "ET-02"} for var in VARIABLES_CON_RANGO_M09}
     if not isinstance(rangos, dict) or especie not in et02.ESPECIES:
         return especie, fuentes
-    aplicados: dict[str, tuple[tuple[float, float], tuple[float, float]]] = {}
+    propia = et02.ESPECIES[especie]
+    aplicados: dict[str, dict[str, tuple[float, float]]] = {}
     for var in VARIABLES_CON_RANGO_M09:
         if var not in rangos:
             continue
-        try:
-            s_min, s_max = (float(x) for x in rangos[var]["sano"])
-            p_min, p_max = (float(x) for x in rangos[var]["plausible"])
-        except (KeyError, TypeError, ValueError):
-            logger.warning("C3: rango de %s mal formado para %s, se usa el de ET-02: %r", var, especie, rangos[var])
+        sano = _banda_m09(especie, var, rangos[var], "sano")
+        plausible = None
+        if PLAUSIBLE_M09_HABILITADA:
+            plausible = _banda_m09(especie, var, rangos[var], "plausible")
+        if sano is None and plausible is None:
             continue
-        if not (p_min <= s_min < s_max <= p_max):
+        s_min, s_max = sano or propia["rango_sano"][var]
+        p_min, p_max = plausible or propia["rango_plausible"][var]
+        if not (p_min <= s_min and s_max <= p_max):
             logger.warning(
-                "C3: el rango de %s para %s no cumple plausible ⊇ sano (sano %s–%s, plausible %s–%s); "
-                "se usa el de ET-02.", var, especie, s_min, s_max, p_min, p_max,
+                "C3: %s de %s no cumple plausible ⊇ sano (sano %s–%s, plausible %s–%s); "
+                "se usa ET-02.",
+                var, especie, s_min, s_max, p_min, p_max,
             )
             continue
-        aplicados[var] = ((s_min, s_max), (p_min, p_max))
-        fuentes[var] = "M09"
+        aplicados[var] = {}
+        if sano is not None:
+            aplicados[var]["sano"] = sano
+        if plausible is not None:
+            aplicados[var]["plausible"] = plausible
+        for banda in aplicados[var]:
+            fuentes[var][banda] = "M09"
     if not aplicados:
         return especie, fuentes
     clave = f"{especie}|M09|{json.dumps(aplicados, sort_keys=True)}"
     if clave not in et02.ESPECIES:
-        # ponytail: una entrada por combinación de rangos vista; crece solo si M09 cambia los umbrales.
-        def_especie = json.loads(json.dumps(et02.ESPECIES[especie]))
-        for var, (sano, plausible) in aplicados.items():
-            def_especie["rango_sano"][var] = sano
-            def_especie["rango_plausible"][var] = plausible
-            def_especie["rango_sano_fuente"][var] = def_especie["rango_plausible_fuente"][var] = "M09 · RF-17"
+        # ponytail: una entrada por combinación de rangos vista; crece solo si M09 cambia los
+        # umbrales.
+        def_especie = json.loads(json.dumps(propia))
+        for var, bandas in aplicados.items():
+            for banda, valor in bandas.items():
+                def_especie[f"rango_{banda}"][var] = valor
+                def_especie[f"rango_{banda}_fuente"][var] = "M09 · RF-17"
         et02.ESPECIES.setdefault(clave, def_especie)
     return clave, fuentes
 
@@ -172,7 +207,8 @@ def inferir(
     utilizable (sin lecturas suficientes, sin línea base vigente, error de datos). Sin resultado el
     paquete igual queda ENVIADO en el backend, así que el motivo se deja en el log.
 
-    ``rangos_especie`` (opcional) son las bandas de M09 · RF-17 que manda el backend (C3)."""
+    ``rangos_especie`` (opcional) son las bandas de M09 · RF-17 que manda el backend (C3): ver
+    ``especie_con_rangos_m09``."""
     id_activo = modelo.id_activo_biologico
     try:
         filas = lecturas_a_filas(lecturas)
@@ -193,6 +229,21 @@ def inferir(
     linea_base = dataclasses.replace(modelo.linea_base, especie=clave)
     contrato = et02.inferir_estado_individual(paquete, linea_base, modelo.artefacto)
     contrato.update(id_especie=especie, fuente_rangos_especie=fuentes)
+    # El contrato no viaja al backend: este log es el rastro de qué rango se aplicó.
+    logger.info(
+        "C3: activo %s: rangos=%s, fuera del rango sano=%s",
+        id_activo,
+        fuentes,
+        contrato.get("variables_fuera_rango_sano"),
+    )
+    eventos = contrato.get("eventos_regla_dura_rf17")
+    if eventos:
+        logger.warning(
+            "RF-17: activo %s: %d lectura(s) descartada(s) fuera de la banda plausible en %s",
+            id_activo,
+            len(eventos),
+            sorted({e["variable"] for e in eventos}),
+        )
     decision = et02.aplicar_reglas_rf66(contrato)
     if contrato.get("estado") != "OK" or not decision["utilizable"]:
         logger.warning(
