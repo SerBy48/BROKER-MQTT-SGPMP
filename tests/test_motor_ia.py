@@ -3,6 +3,7 @@
 # | 2026-10-30 | Arekkazu | RF-66: esqueleto del motor de inferencia M04 (M1)                |
 # | 2026-10-30 | Arekkazu | RF-66: inferencia ET-02 y entrega de resultados al backend (M2)  |
 # | 2026-10-31 | Arekkazu | RF-17 C3: rangos de M09 en la inferencia, con respaldo a ET-02   |
+# | 2026-10-31 | SerBy48  | RF-66: 403/404, timestamps mixtos, lecturas inválidas y reloj    |
 """Motor de inferencia M04: arranque, token, inferencia ET-02 y entrega al backend.
 
 Requiere el extra ``[motor-ia]`` (onnxruntime, numpy, pandas); sin él se omite.
@@ -10,8 +11,11 @@ Requiere el extra ``[motor-ia]`` (onnxruntime, numpy, pandas); sin él se omite.
 
 from __future__ import annotations
 
+import copy
 import json
+import logging
 import shutil
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -21,6 +25,7 @@ pytest.importorskip("onnxruntime")
 import httpx  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 
+from motor_ia import et02  # noqa: E402
 from motor_ia.backend import normalizar_url_base  # noqa: E402
 from motor_ia.individual import (  # noqa: E402
     CatalogoInvalidoError,
@@ -36,6 +41,21 @@ FIXTURES = Path(__file__).parent / "fixtures" / "et02_bov001"
 REFERENCIA = json.loads((FIXTURES / "referencia.json").read_text(encoding="utf-8"))["casos"]
 NORMAL, SEPTICEMIA, ESTRES = REFERENCIA
 BACKEND = "https://api.arekkazu.top/api-sgpmp-test"
+_ESTADO_CALIBRACION_REAL = et02.estado_calibracion
+
+
+def _fijar_fecha(monkeypatch: pytest.MonkeyPatch, fecha: datetime) -> None:
+    monkeypatch.setattr(
+        et02,
+        "estado_calibracion",
+        lambda lb, _ahora, *args: _ESTADO_CALIBRACION_REAL(lb, fecha, *args),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _linea_base_vigente(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La línea base de prueba vence a los 6 meses (feb. 2027): las pruebas no dependen del día."""
+    _fijar_fecha(monkeypatch, datetime(2026, 10, 31, tzinfo=UTC))
 
 
 def _app(**kw) -> TestClient:
@@ -183,6 +203,74 @@ def test_rango_invalido_usa_el_de_et02(rangos) -> None:
     assert {k: contrato[k] for k in SEPTICEMIA["esperado"]} == SEPTICEMIA["esperado"]
 
 
+def test_timestamps_en_formatos_mixtos_dan_el_mismo_resultado() -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    lecturas = copy.deepcopy(SEPTICEMIA["lecturas"])
+    for lectura in lecturas[::2]:
+        lectura["timestamp"] = lectura["timestamp"].replace("+00:00", ".000000+00:00")
+    contrato, _ = inferir(modelo, lecturas)
+    assert {k: contrato[k] for k in SEPTICEMIA["esperado"]} == SEPTICEMIA["esperado"]
+
+
+def test_timestamps_con_y_sin_fraccion_producen_resultado() -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    lecturas = copy.deepcopy(SEPTICEMIA["lecturas"])
+    for lectura in lecturas[1::2]:
+        lectura["timestamp"] = lectura["timestamp"].replace("+00:00", ".123456+00:00")
+    assert inferir(modelo, lecturas) is not None
+
+
+@pytest.mark.parametrize(
+    "lecturas",
+    [
+        "abc",
+        [1],
+        5,
+        [{"variable": "temperatura_corporal", "valor": 39}],
+        [{"timestamp": "x", "variable": "temperatura_corporal", "valor": 39}],
+    ],
+    ids=["texto", "no_dict", "no_iterable", "sin_timestamp", "timestamp_invalido"],
+)
+def test_lecturas_invalidas_no_dan_resultado_y_quedan_en_el_log(
+    lecturas, caplog: pytest.LogCaptureFixture
+) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    with caplog.at_level(logging.WARNING):
+        assert inferir(modelo, lecturas) is None
+    assert "activo 885 sin resultado: lecturas inválidas" in caplog.text
+
+
+def test_lecturas_no_aptas_dejan_el_motivo_en_el_log(caplog: pytest.LogCaptureFixture) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    lecturas = [{**lectura, "apto_para_ia": False} for lectura in SEPTICEMIA["lecturas"]]
+    with caplog.at_level(logging.WARNING):
+        assert inferir(modelo, lecturas) is None
+    assert "estado=NO_EJECUTA" in caplog.text and "descartadas_no_aptas_ia" in caplog.text
+
+
+def test_linea_base_vencida_deja_el_motivo_en_el_log(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    _fijar_fecha(monkeypatch, datetime(2027, 3, 1, tzinfo=UTC))
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    with caplog.at_level(logging.WARNING):
+        assert inferir(modelo, SEPTICEMIA["lecturas"]) is None
+    assert "sin línea base vigente" in caplog.text
+
+
+def test_clase_no_evaluable_sin_temperatura_queda_en_el_log(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    lecturas = [x for x in SEPTICEMIA["lecturas"] if x["variable"] != "temperatura_corporal"]
+    contrato, decision = inferir(modelo, lecturas)
+    assert contrato["clase_predicha"] == "SEPTICEMIA"
+    with caplog.at_level(logging.WARNING):
+        r = a_resultado_rf66(modelo, contrato, decision, id_paquete=1)
+    assert r["contexto_incompleto"] is True
+    assert "SEPTICEMIA predicha sin temperatura" in caplog.text
+
+
 def test_sin_lecturas_no_hay_resultado() -> None:
     modelo = cargar_catalogo(str(FIXTURES))[885]
     assert inferir(modelo, []) is None
@@ -218,14 +306,14 @@ def test_resultado_rf66_nivel_y_patologia(caso: dict, nivel: int, codigo: int) -
 
 
 class _BackendFalso:
-    def __init__(self, status: int = 201) -> None:
-        self.status, self.recibidos = status, []
+    def __init__(self, status: int = 201, cuerpo: dict | None = None) -> None:
+        self.status, self.cuerpo, self.recibidos = status, {} if status < 400 else cuerpo, []
 
     def __call__(self, request: httpx.Request) -> httpx.Response:
         self.recibidos.append(
             (str(request.url), request.headers["authorization"], json.loads(request.content))
         )
-        return httpx.Response(self.status, json={})
+        return httpx.Response(self.status, json=self.cuerpo)
 
 
 def _con_modelos(backend: _BackendFalso) -> TestClient:
@@ -292,8 +380,53 @@ def test_backend_caido_responde_503_para_que_reenvie() -> None:
     assert (r.status_code, r.json()["error_code"]) == (503, "BACKEND_NO_DISPONIBLE")
 
 
-def test_rechazo_del_backend_no_se_reintenta() -> None:
-    r = _con_modelos(_BackendFalso(422)).post(
+@pytest.mark.parametrize(
+    "backend",
+    [
+        _BackendFalso(403, {"detail": "Forbidden"}),
+        _BackendFalso(404, {"detail": "Not Found"}),
+        _BackendFalso(404),
+    ],
+    ids=["403_proxy", "404_ruta", "404_sin_json"],
+)
+def test_ruta_o_proxy_responde_503_para_que_reenvie(backend: _BackendFalso) -> None:
+    r = _con_modelos(backend).post(
+        "/v1/paquetes",
+        headers=AUTH,
+        json=_lote(
+            {
+                "id_paquetes_inferencia": 1,
+                "id_activo_biologico": 885,
+                "lecturas": NORMAL["lecturas"],
+            }
+        ),
+    )
+    assert (r.status_code, r.json()["error_code"]) == (503, "BACKEND_NO_DISPONIBLE")
+
+
+def test_activo_invalido_no_tumba_el_lote() -> None:
+    r = _con_modelos(_BackendFalso()).post(
+        "/v1/paquetes",
+        headers=AUTH,
+        json=_lote(
+            {"id_paquetes_inferencia": 1, "id_activo_biologico": [885]},
+            {
+                "id_paquetes_inferencia": 2,
+                "id_activo_biologico": 885,
+                "lecturas": NORMAL["lecturas"],
+            },
+        ),
+    )
+    assert r.status_code == 200 and len(r.json()["resultados_registrados"]) == 1
+
+
+@pytest.mark.parametrize(
+    "backend",
+    [_BackendFalso(422), _BackendFalso(404, {"error_code": "VERSION_MODELO_NO_ENCONTRADA"})],
+    ids=["422", "404_de_negocio"],
+)
+def test_rechazo_del_backend_no_se_reintenta(backend: _BackendFalso) -> None:
+    r = _con_modelos(backend).post(
         "/v1/paquetes",
         headers=AUTH,
         json=_lote(

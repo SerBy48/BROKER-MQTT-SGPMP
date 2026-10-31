@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: el motor entrega sus resultados al backend (M2)           |
+# | 2026-10-31 | SerBy48  | RF-66: 403 y 404 de ruta o proxy se reintentan, no se consumen   |
 """Cliente motor → backend: ``POST {BACKEND_URL}/prediccion/inferencias``.
 
 ``BACKEND_URL`` es la URL base del backend en cualquier dominio, con su prefijo si lo tiene
@@ -37,6 +38,22 @@ def normalizar_url_base(url: str) -> str:
     return url
 
 
+def _es_rechazo_de_datos(r: httpx.Response) -> bool:
+    """4xx que decidió la lógica del backend: reenviar el resultado no cambia nada.
+
+    401, 403, 408 y 429 se resuelven solos o con configuración. Este endpoint no responde 403, y un
+    404 sin ``error_code`` tampoco es suyo: vienen de un proxy o de un ``BACKEND_URL`` con prefijo
+    errado, y consumirlos dejaría los paquetes en ENVIADO sin haber entregado nada.
+    """
+    if r.status_code == 404:
+        try:
+            cuerpo = r.json()
+        except ValueError:
+            return False
+        return isinstance(cuerpo, dict) and bool(cuerpo.get("error_code"))
+    return 400 <= r.status_code < 500 and r.status_code not in (401, 403, 408, 429)
+
+
 class BackendResultadosClient:
     def __init__(
         self, url_base: str, token: str, transport: httpx.BaseTransport | None = None
@@ -51,7 +68,7 @@ class BackendResultadosClient:
 
     def registrar(self, resultado: dict) -> bool:
         """True si el backend lo guardó (201) o ya lo tenía (200). False si lo rechazó por datos
-        (4xx): reenviarlo no cambia nada. Error de red o 5xx → BackendNoDisponibleError."""
+        (ver ``_es_rechazo_de_datos``). Cualquier otro caso → BackendNoDisponibleError."""
         try:
             with httpx.Client(
                 timeout=_TIMEOUT_S, transport=self._transport, follow_redirects=False
@@ -63,7 +80,7 @@ class BackendResultadosClient:
             ) from exc
         if r.is_success:
             return True
-        if 400 <= r.status_code < 500 and r.status_code not in (401, 408, 429):
+        if _es_rechazo_de_datos(r):
             logger.warning(
                 "RF-66: el backend rechazó el resultado %s del activo %s: HTTP %s %s",
                 resultado["id_resultado_inferencia"],
@@ -72,5 +89,5 @@ class BackendResultadosClient:
                 r.text[:300],
             )
             return False
-        # 401 (token desalineado), 408, 429 y 5xx se resuelven solos: que el backend reintente.
+        # Token desalineado, proxy, ruta errada, 408, 429 y 5xx: que el backend reintente.
         raise BackendNoDisponibleError(f"el backend respondió HTTP {r.status_code}")
