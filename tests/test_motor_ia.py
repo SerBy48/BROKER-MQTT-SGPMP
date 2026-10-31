@@ -2,6 +2,7 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: esqueleto del motor de inferencia M04 (M1)                |
 # | 2026-10-30 | Arekkazu | RF-66: inferencia ET-02 y entrega de resultados al backend (M2)  |
+# | 2026-10-31 | Arekkazu | RF-17 C3: rangos de M09 en la inferencia, con respaldo a ET-02   |
 """Motor de inferencia M04: arranque, token, inferencia ET-02 y entrega al backend.
 
 Requiere el extra ``[motor-ia]`` (onnxruntime, numpy, pandas); sin él se omite.
@@ -132,6 +133,54 @@ def test_inferencia_igual_a_la_referencia_et02(caso: dict) -> None:
     contrato, decision = inferir(modelo, caso["lecturas"])
     assert {k: contrato[k] for k in caso["esperado"]} == caso["esperado"]
     assert decision["modo_sombra"] is True  # modelo SINTETICO: calcula y registra, no alerta
+
+
+# ── C3: rangos de M09 · RF-17 ────────────────────────────────────────────
+
+RANGOS_M09_AMPLIOS = {
+    "temperatura_corporal": {"sano": [36.0, 42.0], "plausible": [35.0, 43.0]},
+    "frecuencia_cardiaca": {"sano": [30.0, 150.0], "plausible": [30.0, 160.0]},
+}
+
+
+def test_rangos_m09_cambian_el_rango_sano_y_no_el_modelo() -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    propio, _ = inferir(modelo, SEPTICEMIA["lecturas"])
+    m09, _ = inferir(modelo, SEPTICEMIA["lecturas"], RANGOS_M09_AMPLIOS)
+    # Con la banda de ET-02 (38.0–39.5 °C) la fiebre sale de lo sano; con la de M09 (36–42), no.
+    assert propio["variables_fuera_rango_sano"] == ["temperatura_corporal"]
+    assert m09["variables_fuera_rango_sano"] == []
+    assert m09["fuente_rangos_especie"] == {"frecuencia_cardiaca": "M09", "temperatura_corporal": "M09"}
+    assert propio["fuente_rangos_especie"] == {"frecuencia_cardiaca": "ET-02", "temperatura_corporal": "ET-02"}
+    # En operación el rango sano no filtra: el modelo ve las mismas lecturas.
+    assert (m09["id_especie"], m09["clase_predicha"], m09["probabilidades"]) == (
+        "BOVINO", propio["clase_predicha"], propio["probabilidades"],
+    )
+
+
+def test_plausible_de_m09_descarta_lecturas_como_regla_dura() -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    # La fiebre del caso (~40–40.6 °C) cabe en la plausible de ET-02 (35–43) pero no en esta.
+    rangos = {"temperatura_corporal": {"sano": [38.0, 39.0], "plausible": [37.0, 40.0]}}
+    propio, _ = inferir(modelo, SEPTICEMIA["lecturas"])
+    m09, _ = inferir(modelo, SEPTICEMIA["lecturas"], rangos)
+    assert propio["eventos_regla_dura_rf17"] == []
+    assert m09["eventos_regla_dura_rf17"]
+    assert {e["rango_plausible_especie"][1] for e in m09["eventos_regla_dura_rf17"]} == {40.0}
+
+
+@pytest.mark.parametrize("rangos", [
+    {"temperatura_corporal": {"sano": [37.0, 41.0], "plausible": [38.0, 40.0]}},  # plausible ⊉ sano
+    {"temperatura_corporal": {"sano": [39.5, 38.0], "plausible": [35.0, 43.0]}},  # min > max
+    {"temperatura_corporal": {"sano": "38-39"}},                                    # mal formado
+    {"actividad_indice": {"sano": [0.2, 0.3], "plausible": [0.0, 0.5]}},           # no configurable
+    None,
+], ids=["invariante", "invertido", "mal_formado", "actividad", "sin_rangos"])
+def test_rango_invalido_usa_el_de_et02(rangos) -> None:
+    modelo = cargar_catalogo(str(FIXTURES))[885]
+    contrato, _ = inferir(modelo, SEPTICEMIA["lecturas"], rangos)
+    assert contrato["fuente_rangos_especie"]["temperatura_corporal"] == "ET-02"
+    assert {k: contrato[k] for k in SEPTICEMIA["esperado"]} == SEPTICEMIA["esperado"]
 
 
 def test_sin_lecturas_no_hay_resultado() -> None:
