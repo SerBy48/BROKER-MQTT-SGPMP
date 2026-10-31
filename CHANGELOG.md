@@ -1,3 +1,29 @@
+## [0.4.0-rc.12](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.11...v0.4.0-rc.12) (2026-10-31)
+
+### Features
+
+* **rf17-motor-ia:** el modelo individual usa los rangos de M09 que manda el backend ([a749b97](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a749b971407eb70cc86258a3b4595ef595c554b7))
+
+### Bug Fixes
+
+* **rf17-motor-ia:** resolver cada banda por separado y no usar valor_min-valor_max como plausible ([1a8e633](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/1a8e6334c3b37fa89145bcbf35e45cd89bc8f79a))
+
+## [0.4.0-rc.11](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.10...v0.4.0-rc.11) (2026-10-31)
+
+### Features
+
+* **rf66:** el motor infiere con el modelo individual ET-02 y entrega los resultados al backend ([0d28d7d](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/0d28d7dc36d380f56842a5791ca3d3465ab42e4a))
+
+### Bug Fixes
+
+* **rf66:** no perder paquetes por ruta o proxy y dejar rastro cuando no hay resultado ([b372217](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b372217444e67489856fcd2200c163310ebfbc69))
+
+## [0.4.0-rc.10](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.9...v0.4.0-rc.10) (2026-10-31)
+
+### Features
+
+* **rf66:** esqueleto del motor de inferencia M04 (motor-ia) como servicio aparte ([35e7390](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/35e7390c3935e327eba0cc6553e8c33dac77c34f))
+
 ## [0.4.0-rc.9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.8...v0.4.0-rc.9) (2026-10-29)
 
 ### Bug Fixes
