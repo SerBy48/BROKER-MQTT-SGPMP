@@ -13,6 +13,7 @@ on:
       - main
     paths:
       - "app/**"
+      - "motor_ia/**"
       - "pyproject.toml"
       - "requirements*.lock"
       - ".github/workflows/sast.yml"
@@ -45,7 +46,7 @@ jobs:
 
       - name: Ejecutar Semgrep SAST Scan
         run: |
-          echo "Ejecutando Semgrep sobre app/ con rulesets OWASP Top 10, Python, FastAPI y JWT..."
+          echo "Ejecutando Semgrep sobre app/ y motor_ia/ con rulesets OWASP Top 10, Python, FastAPI y JWT..."
           semgrep scan \
             --config "p/owasp-top-ten" \
             --config "p/python" \
@@ -53,7 +54,7 @@ jobs:
             --config "p/jwt" \
             --severity ERROR \
             --sarif --sarif-output semgrep.sarif \
-            app/
+            app/ motor_ia/
 
       - name: Subir reporte SARIF como artefacto
         if: always()
@@ -86,13 +87,13 @@ jobs:
       - name: Generar Reporte de Auditoría Bandit (Media y Alta)
         run: |
           echo "Generando reporte de hallazgos Bandit (Severidad Media/Alta, Confianza Media/Alta)..."
-          bandit -r app -ll -ii -x "tests,.venv,venv,scripts" -f txt -o bandit-report.txt || true
+          bandit -r app motor_ia -ll -ii -x "tests,.venv,venv,scripts" -f txt -o bandit-report.txt || true
           cat bandit-report.txt
 
       - name: Control de Bloqueo Bandit (Severidad Alta)
         run: |
           echo "Verificando ausencia de vulnerabilidades de severidad ALTA y confianza ALTA..."
-          bandit -r app -lll -iii -x "tests,.venv,venv,scripts" -f screen
+          bandit -r app motor_ia -lll -iii -x "tests,.venv,venv,scripts" -f screen
 
       - name: Subir reporte Bandit como artefacto
         if: always()
