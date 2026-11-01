@@ -1,9 +1,16 @@
+# | Fecha      | Nombre   | Que se hizo                                                     |
+# |------------|----------|-----------------------------------------------------------------|
+# | 2026-10-31 | Arekkazu | RF-66: modelos desde ./modelos del host en lugar de volumen vacío |
 # Solo para desarrollo local del motor de inferencia M04. En DEV/TEST/PROD el motor es una
 # Application de Dokploy por ambiente construida con Dockerfile.motor-ia; NO se agrega a los
 # docker-compose del broker (quedarían dos motores).
 #
 #   cp .env.motor-ia.example .env.motor-ia   # completar el token; .env.motor-ia no se versiona
 #   docker compose --env-file .env.motor-ia -f docker-compose.motor-ia.yml up --build
+#
+# Modelos: se copian a ./modelos (catalogo.json + los .onnx/.json de ET-02, ignorada por git) y se
+# define MOTOR_IA_DIR_MODELOS=/data/modelos en .env.motor-ia. Sin eso el motor arranca sin modelos.
+# Cómo se suben en DEV/TEST/PROD: docs/MOTOR_IA_MODELOS_DOKPLOY.md.
 #
 # El healthcheck viene de la imagen (Dockerfile.motor-ia).
 services:
@@ -19,9 +26,11 @@ services:
       MOTOR_IA_DIR_MODELOS: ${MOTOR_IA_DIR_MODELOS:-}
       UVICORN_ROOT_PATH: ${UVICORN_ROOT_PATH:-}
     ports:
-      - "8000:8000"
+      # 8100 en el host: el backend local ya ocupa el 8000. Dentro del contenedor sigue en 8000.
+      - "${MOTOR_IA_PUERTO_LOCAL:-8100}:8000"
     volumes:
-      - motor-ia-data:/data/modelos
+      # Solo lectura: el motor carga el catálogo al arrancar y no escribe (la caché de M3 sí lo hará).
+      - ./modelos:/data/modelos:ro
     restart: unless-stopped
     # Provisionales: se recalculan con la prueba de latencia M6 (P95 < 2 s).
     deploy:
@@ -31,6 +40,3 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-
-volumes:
-  motor-ia-data:

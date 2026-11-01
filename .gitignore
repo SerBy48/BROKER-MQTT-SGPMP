@@ -41,3 +41,6 @@ htmlcov/
 .idea/
 .vscode/
 .DS_Store
+# Artefactos de ET-02 del motor de inferencia (RF-66): van por volumen/montaje,
+# no a git (docs/MOTOR_IA_MODELOS_DOKPLOY.md).
+modelos/
