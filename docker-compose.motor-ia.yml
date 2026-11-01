@@ -1,6 +1,6 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
-# | 2026-10-31 | Arekkazu | RF-66: modelos desde ./modelos del host en lugar de volumen vacío |
+# | 2026-10-31 | Arekkazu | RF-66: modelos desde ./modelos del host, puerto 8100              |
 # Solo para desarrollo local del motor de inferencia M04. En DEV/TEST/PROD el motor es una
 # Application de Dokploy por ambiente construida con Dockerfile.motor-ia; NO se agrega a los
 # docker-compose del broker (quedarían dos motores).
@@ -26,8 +26,7 @@ services:
       MOTOR_IA_DIR_MODELOS: ${MOTOR_IA_DIR_MODELOS:-}
       UVICORN_ROOT_PATH: ${UVICORN_ROOT_PATH:-}
     ports:
-      # 8100 en el host: el backend local ya ocupa el 8000. Dentro del contenedor sigue en 8000.
-      - "${MOTOR_IA_PUERTO_LOCAL:-8100}:8000"
+      - "8100:8100"
     volumes:
       # Solo lectura: el motor carga el catálogo al arrancar y no escribe (la caché de M3 sí lo hará).
       - ./modelos:/data/modelos:ro

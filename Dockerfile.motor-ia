@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo                                                     |
+# |------------|----------|-----------------------------------------------------------------|
+# | 2026-10-31 | Arekkazu | RF-66: vuelve al puerto 8100 definido para el despliegue        |
 # Imagen del motor de inferencia M04 (motor_ia/, RF-66). Servicio aparte del broker: en Dokploy
 # es una Application propia por ambiente (motor-ia-dev / -test / -main) que construye este archivo.
 #
@@ -36,7 +39,7 @@ COPY --from=builder /opt/venv /opt/venv
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PORT=8000 \
+    PORT=8100 \
     OMP_NUM_THREADS=1
 
 WORKDIR /app
@@ -56,14 +59,15 @@ RUN /usr/local/bin/python -m pip uninstall -y pip \
 
 USER 1001
 
-# 8000 porque los servicios de Dokploy ya apuntan a ese puerto (el docstring del motor usa 8100).
-EXPOSE 8000
+# 8100: el puerto definido para el motor desde el PR #49. En Dokploy, el dominio de la Application
+# tiene que apuntar a Container Port 8100 (si apunta a otro, Traefik responde 502).
+EXPOSE 8100
 
 # Healthcheck en la imagen y no en un compose (convención del proyecto): en Dokploy el motor es una
 # Application construida con este Dockerfile, sin compose. /v1/healthz responde 200 sin token y sin
 # modelos. urlopen lanza excepción ante error o timeout → código de salida 1 → unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD ["python", "-c", "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/v1/healthz' % os.environ.get('PORT', '8000'), timeout=4)"]
+    CMD ["python", "-c", "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/v1/healthz' % os.environ.get('PORT', '8100'), timeout=4)"]
 
 # sh -c para expandir PORT; exec para que uvicorn sea PID 1 y reciba el SIGTERM del apagado.
 # Un solo proceso: el catálogo se carga en memoria al arrancar. Detrás del prefijo de Traefik

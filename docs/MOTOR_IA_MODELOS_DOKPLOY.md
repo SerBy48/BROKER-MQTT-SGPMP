@@ -43,7 +43,9 @@ modelos/
 
 ## Paso a paso (una vez por ambiente)
 
-Ejemplo con TEST; en DEV y PROD solo cambia el nombre de la carpeta.
+Ejemplo con TEST; en DEV y PROD solo cambia el nombre de la carpeta. Los valores de despliegue son
+los definidos desde el PR #49 y no cambian: puerto **8100** (Container Port del dominio) y prefijo
+`/model-ia-dev` · `/model-ia-test` · `/model-ia` con Strip Path.
 
 1. **Copiar la carpeta al servidor** de Dokploy, fuera de las carpetas que administra Dokploy:
 
@@ -69,7 +71,7 @@ Ejemplo con TEST; en DEV y PROD solo cambia el nombre de la carpeta.
 4. **Redeploy** y comprobar:
 
    ```bash
-   curl -s https://api.inmero.co/<prefijo-del-motor-en-test>/v1/healthz
+   curl -s https://api.inmero.co/model-ia-test/v1/healthz
    # {"status":"ok","modelos_cargados":1,"backend":"https://api.inmero.co/api-sgpmp-test/..."}
    ```
 
