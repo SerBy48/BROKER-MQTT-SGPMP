@@ -207,7 +207,8 @@ enviarlo siempre (registrar un segundo sensor no obliga a tocar el firmware).
   dispositivo: rechazo **definitivo** `ERROR_SENSOR`. El Edge actual no se suscribe a
   `sgpmp/<serial>/resultado` y borra la lectura de su buffer con el PUBACK, así que
   **esa lectura se pierde**: configurar el `sensor` antes de registrar un segundo
-  sensor en la plataforma. La causa queda en
+  sensor en la plataforma, y registrarlo enseguida, porque hasta entonces las lecturas
+  que ya lo nombran también se rechazan. La causa queda en
   `modulo3.transmisiones_mqtt.error_descripcion` (y en el aviso de `resultado`).
 - Con un único sensor, una lectura de otra variable (p. ej. humedad en un sensor de
   temperatura) se sigue aceptando: el catálogo no relaciona sensor y variable, así
