@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: evento sin sensor resoluble: mensaje con la causa |
 """BRK-03/04/08 (D4, D5 y D6 de AIOT-DEV-03): los topics `vision`, `evento` y
 `ota/<evento>` se reenvían a su endpoint interno del backend, con el serial del topic."""
 
@@ -182,7 +185,7 @@ async def test_dispositivo_sin_sensores_no_se_reenvia(enviados, caplog) -> None:
               "variables_involucradas": [_variable("humedad_relativa", None)]}
     await _publicar("sgpmp/EDGE-VACIO/evento", evento)
     assert enviados == []
-    assert "dispositivo sin sensores" in caplog.text
+    assert "no tiene un único sensor activo" in caplog.text
 
 
 async def test_metadata_edge_gana_ante_colision(enviados, caplog) -> None:

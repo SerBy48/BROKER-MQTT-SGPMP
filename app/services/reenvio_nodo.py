@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-55: evento sin sensor resoluble se descarta con la causa |
 """Mensajes del nodo que el broker reenvía a endpoints internos del backend (P2).
 
 - `vision` (BRK-03, D4): vector de comportamiento → `POST /iot/telemetria/vision`.
@@ -95,13 +98,17 @@ async def evento_edge(serial: str, data: dict[str, Any]) -> None:
         # Raíz: la primaria; si no resolvió, la primera que sí.
         sensor_id = next((s for s in por_variable.values() if s is not None), None)
         if sensor_id is None:
-            # La lectura LoRa del Gateway no trae `sensor` (edge-firmware 0.3.0): la raíz
-            # sale de la misma regla que la ingesta de telemetría, para que el evento
-            # apunte al sensor donde quedó guardada su lectura. El mapa queda en None.
+            # Ninguna variable trae `sensor` (firmware anterior): la raíz sale de la misma
+            # regla que la ingesta de telemetría, que solo resuelve si el dispositivo tiene un
+            # único sensor activo. El mapa queda en None.
             sensor_id = await registry.resolve_sensor_id(session, device_id)
         if sensor_id is None:
             # `sensor_id` es obligatorio en el backend: reenviarlo sería un 422 seguro.
-            logger.warning("Evento Edge de %s descartado: dispositivo sin sensores.", serial)
+            logger.warning(
+                "Evento Edge de %s descartado: sus variables no traen `sensor` y el "
+                "dispositivo no tiene un único sensor activo.",
+                serial,
+            )
             return
     if sin_sensor := [v for v, s in por_variable.items() if s is None]:
         # INFO y no WARNING: con el firmware actual pasa en cada evento.
