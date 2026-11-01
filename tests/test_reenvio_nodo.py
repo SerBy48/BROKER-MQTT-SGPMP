@@ -1,3 +1,7 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: evento sin sensor resoluble: mensaje con la causa |
+# | 2026-11-01 | Arekkazu | RF-23/RF-55: nombre inexistente no cae al único sensor |
 """BRK-03/04/08 (D4, D5 y D6 de AIOT-DEV-03): los topics `vision`, `evento` y
 `ota/<evento>` se reenvían a su endpoint interno del backend, con el serial del topic."""
 
@@ -15,9 +19,12 @@ from app.mqtt import handlers
 from app.mqtt.handlers import TopicIot, parsear_topic
 from app.services import reenvio, reenvio_nodo
 
-DISPOSITIVOS = {"EDGE-1": 12, "EDGE-VACIO": 13}
-SENSORES = {12: {"dht22_ambiente": 342, "dht22_humedad": 343, "ds18b20_agua": 344}}
-PRIMER_SENSOR_ACTIVO = {12: 342}
+DISPOSITIVOS = {"EDGE-1": 12, "EDGE-VACIO": 13, "EDGE-UNO": 14}
+SENSORES = {
+    12: {"dht22_ambiente": 342, "dht22_humedad": 343, "ds18b20_agua": 344},
+    14: {"unico": 500},
+}
+PRIMER_SENSOR_ACTIVO = {12: 342, 14: 500}
 
 
 @pytest.fixture(autouse=True)
@@ -182,7 +189,7 @@ async def test_dispositivo_sin_sensores_no_se_reenvia(enviados, caplog) -> None:
               "variables_involucradas": [_variable("humedad_relativa", None)]}
     await _publicar("sgpmp/EDGE-VACIO/evento", evento)
     assert enviados == []
-    assert "dispositivo sin sensores" in caplog.text
+    assert "no tiene un único sensor activo" in caplog.text
 
 
 async def test_metadata_edge_gana_ante_colision(enviados, caplog) -> None:
@@ -216,3 +223,16 @@ async def test_notify_propio_y_eventos_fuera_del_contrato_no_se_reenvian(enviado
 async def test_payload_que_no_es_objeto_se_descarta(enviados) -> None:
     await handlers.handle_message("sgpmp/EDGE-1/vision", b"[1, 2]")
     assert enviados == []
+
+
+async def test_nombre_inexistente_no_cae_al_unico_sensor(enviados, consultas, caplog) -> None:
+    """Como en la telemetría: un `sensor` que no existe se descarta aunque el dispositivo
+    tenga un único sensor activo; el sensor por defecto es solo para eventos sin nombres."""
+    evento = {
+        "clasificacion_rf55": "DESVIACION_SIMPLE",
+        "variables_involucradas": [_variable("humedad_relativa", "no-existe")],
+    }
+    await _publicar("sgpmp/EDGE-UNO/evento", evento)
+    assert enviados == []
+    assert "no tiene sensores llamados ['no-existe']" in caplog.text
+    assert ("primer_sensor", 14) not in consultas

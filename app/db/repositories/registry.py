@@ -2,6 +2,7 @@
 # |------------|----------|-------------|
 # | 2026-10-20 | Arekkazu | BRK-11 RFC-016: contexto de prioridad (área, criticidad, RF-17) |
 # | 2026-10-26 | SerBy48  | BRK-12 RF-55: sensores por nombre para el evento multivariable |
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: sin `sensor`, solo con un único sensor activo |
 """Acceso al registro/catálogo IoT (schema modulo9, solo lectura)."""
 
 from __future__ import annotations
@@ -176,9 +177,14 @@ async def resolve_sensor_id(
     device_id: int,
     sensor_nombre: str | None = None,
 ) -> int | None:
-    # TODO: definir la estrategia real de resolución sensor<->variable con el
-    # equipo de IoT. Por ahora: por nombre si viene en el payload; si no, el
-    # primer sensor activo del dispositivo.
+    """Sensor de una lectura dentro de su dispositivo.
+
+    Con `sensor_nombre`, el sensor de ese nombre (único por dispositivo desde la migración
+    `c9a8cc1ef814` del backend); los inactivos también, para que el backend deje el intento
+    en su bitácora. Sin nombre, solo si el dispositivo tiene **un único** sensor activo:
+    con varios no hay forma de saber cuál midió la lectura, y antes se tomaba el primero y
+    la lectura quedaba guardada en el sensor equivocado (p. ej. humedad en el de temperatura).
+    """
     if sensor_nombre:
         result = await session.execute(
             text(
@@ -187,17 +193,18 @@ async def resolve_sensor_id(
             ),
             {"device_id": device_id, "nombre": sensor_nombre},
         )
-    else:
-        result = await session.execute(
-            text(
-                "SELECT id_sensores FROM modulo9.sensores "
-                "WHERE id_dispositivo_iot = :device_id AND es_activo = true "
-                "ORDER BY id_sensores LIMIT 1"
-            ),
-            {"device_id": device_id},
-        )
-    row = result.first()
-    return row[0] if row else None
+        row = result.first()
+        return row[0] if row else None
+    result = await session.execute(
+        text(
+            "SELECT id_sensores FROM modulo9.sensores "
+            "WHERE id_dispositivo_iot = :device_id AND es_activo = true "
+            "ORDER BY id_sensores LIMIT 2"
+        ),
+        {"device_id": device_id},
+    )
+    filas = result.all()
+    return filas[0][0] if len(filas) == 1 else None
 
 
 async def sensores_por_nombre(session: AsyncSession, device_id: int) -> dict[str, int]:
