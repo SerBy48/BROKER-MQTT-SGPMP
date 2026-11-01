@@ -1,0 +1,37 @@
+# syntax=docker/dockerfile:1
+FROM python:3.13.0-slim-bookworm AS builder
+
+WORKDIR /build
+RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir ".[motor-ia]"
+
+FROM python:3.13.0-slim-bookworm AS final
+
+ENV PORT=8100
+ENV MOTOR_IA_DIR_MODELOS=/data/modelos
+ENV OMP_NUM_THREADS=1
+
+WORKDIR /app
+
+# Crear usuario no-root y asignar permisos al directorio de modelos
+RUN useradd -m -u 1001 motoria && \
+    mkdir -p /data/modelos && \
+    chown -R 1001:1001 /data/modelos /app
+
+USER 1001:1001
+
+# Copiar paquetes instalados desde el builder
+COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /usr/local/bin /usr/local/bin
+# COPY --chown=1001:1001 motor_ia ./motor_ia  # Descomentar cuando el código esté en la rama
+
+EXPOSE 8100
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD python -c "import urllib.request, sys; urllib.request.urlopen('http://127.0.0.1:${PORT}/v1/healthz') or sys.exit(1)"
+
+# El 'exec' asegura que uvicorn reciba las señales de apagado de Docker correctamente
+CMD ["sh", "-c", "exec uvicorn motor_ia.main:crear_app --factory --host 0.0.0.0 --port ${PORT}"]

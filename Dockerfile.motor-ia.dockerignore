@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env*
+anotaciones/
+evidencias/
+*.onnx
+*.pt
+*.pkl
+*.pyc
+__pycache__
+.pytest_cache
+.mypy_cache
+docs/
+tests/

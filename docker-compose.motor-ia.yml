@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  motor-ia:
+    build:
+      context: .
+      dockerfile: Dockerfile.motor-ia
+    ports:
+      - "8100:8100"
+    environment:
+      - PORT=8100
+      - MOTOR_IA_DIR_MODELOS=/data/modelos
+      - OMP_NUM_THREADS=1
+      - IOT_INFERENCIA_M04_TOKEN=${IOT_INFERENCIA_M04_TOKEN}
+      - BACKEND_URL=${BACKEND_URL}
+    volumes:
+      - motor-ia-data:/data/modelos
+    env_file:
+      - .env.motor-ia.local
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          memory: 256M
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request, sys; urllib.request.urlopen('http://127.0.0.1:8100/v1/healthz') or sys.exit(1)"]
+      interval: 30s
+      timeout: 5s
+      start_period: 20s
+      retries: 3
+
+volumes:
+  motor-ia-data:
