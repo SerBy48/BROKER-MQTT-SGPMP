@@ -1,3 +1,10 @@
+## [0.4.0-rc.14](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.13...v0.4.0-rc.14) (2026-11-01)
+
+### Bug Fixes
+
+* **rf23:** evento con `sensor` inexistente se descarta como la telemetría ([40b2271](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/40b22710ca434d8f126d9162f1c5a82bd830b9c6))
+* **rf23:** la lectura sin `sensor` ya no cae en el primer sensor del dispositivo ([25021ec](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/25021ec02d5de2b2d7a8def0320937abcba170a5))
+
 ## [0.4.0-rc.13](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.12...v0.4.0-rc.13) (2026-11-01)
 
 ### Bug Fixes
