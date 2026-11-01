@@ -1,8 +1,17 @@
+# Solo para Dockerfile.motor-ia (BuildKit usa <Dockerfile>.dockerignore si existe; el
+# .dockerignore del broker no se toca). La imagen copia pyproject.toml, README.md, app/ y motor_ia/.
 .git
+.github
 .gitignore
 .env*
+.venv
+venv
 anotaciones/
 evidencias/
+tests/
+docs/
+docker/
+scripts/
 *.onnx
 *.pt
 *.pkl
@@ -10,5 +19,4 @@ evidencias/
 __pycache__
 .pytest_cache
 .mypy_cache
-docs/
-tests/
+.ruff_cache

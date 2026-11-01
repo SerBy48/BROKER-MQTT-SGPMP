@@ -1,37 +1,71 @@
-# syntax=docker/dockerfile:1
-FROM python:3.13.0-slim-bookworm AS builder
+# Imagen del motor de inferencia M04 (motor_ia/, RF-66). Servicio aparte del broker: en Dokploy
+# es una Application propia por ambiente (motor-ia-dev / -test / -main) que construye este archivo.
+#
+# Digest fijado de python:3.13-slim (3.13.18, Debian 13 trixie, la misma base que el backend).
+# 3.13 y no 3.11 como el broker: numpy==2.5.3 del extra [motor-ia] exige Python >= 3.12.
+# trixie y no bookworm: con bookworm trivy marca 2 CRITICAL del sistema (sqlite, zlib) sin
+# corrección publicada; con trixie quedan 0 CRITICAL. Re-verificar/actualizar con:
+#   docker pull python:3.13-slim && docker inspect --format='{{index .RepoDigests 0}}' python:3.13-slim
+ARG PYTHON_IMAGE=python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f7b0c97cac915fd88ded1d86bb
 
-WORKDIR /build
-RUN apt-get update && apt-get install -y --no-install-recommends gcc && rm -rf /var/lib/apt/lists/*
+# ── builder: instala el paquete y el extra [motor-ia] en un venv ──────────────────────────────
+FROM ${PYTHON_IMAGE} AS builder
 
-COPY pyproject.toml .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir ".[motor-ia]"
+WORKDIR /src
 
-FROM python:3.13.0-slim-bookworm AS final
+RUN python -m venv /opt/venv
 
-ENV PORT=8100
-ENV MOTOR_IA_DIR_MODELOS=/data/modelos
-ENV OMP_NUM_THREADS=1
+# Las versiones salen de pyproject.toml (extra motor-ia), no se repiten aquí. hatchling empaqueta
+# app y motor_ia (tool.hatch.build.targets.wheel) y lee README.md: los cuatro tienen que estar.
+# Sin gcc: onnxruntime, numpy y pandas publican ruedas para cp313.
+COPY pyproject.toml README.md ./
+COPY app ./app
+COPY motor_ia ./motor_ia
+# pip se desinstala del venv al terminar: el motor no lo usa en ejecución y sus copias
+# vendorizadas (urllib3, msgpack) aparecen en trivy como HIGH.
+RUN /opt/venv/bin/pip install --no-cache-dir ".[motor-ia]" \
+    && /opt/venv/bin/python -m pip uninstall -y pip
+
+# ── final: solo el venv, sin el código fuente ni herramientas de construcción ─────────────────
+FROM ${PYTHON_IMAGE}
+
+# Se copia el venv completo y no solo site-packages: el ejecutable uvicorn vive en /opt/venv/bin.
+COPY --from=builder /opt/venv /opt/venv
+# OMP_NUM_THREADS=1: onnxruntime abre un hilo por núcleo del host si no se limita; con el límite
+# de 1 CPU del contenedor eso solo agrega cambios de contexto.
+ENV PATH="/opt/venv/bin:$PATH" \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8000 \
+    OMP_NUM_THREADS=1
 
 WORKDIR /app
 
-# Crear usuario no-root y asignar permisos al directorio de modelos
-RUN useradd -m -u 1001 motoria && \
-    mkdir -p /data/modelos && \
-    chown -R 1001:1001 /data/modelos /app
+# Punto de montaje del volumen con catalogo.json y los artefactos de ET-02. Se crea con dueño
+# 1001 antes de USER para que un volumen nombrado nuevo herede ese dueño.
+# MOTOR_IA_DIR_MODELOS NO se fija aquí: si está definida y la carpeta no tiene catalogo.json,
+# el motor no arranca (motor_ia.individual.cargar_catalogo). Se define en el ambiente cuando el
+# volumen ya tiene su catalogo.json (aunque sea {"modelos": []}).
+# También se quita el pip del Python de la imagen base (mismo motivo que en el venv) y su rueda
+# de ensurepip.
+RUN /usr/local/bin/python -m pip uninstall -y pip \
+    && rm -rf /usr/local/lib/python3.13/ensurepip/_bundled \
+    && useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin motoria \
+    && mkdir -p /data/modelos \
+    && chown 1001:1001 /data/modelos
 
-USER 1001:1001
+USER 1001
 
-# Copiar paquetes instalados desde el builder
-COPY --from=builder /usr/local/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
-# COPY --chown=1001:1001 motor_ia ./motor_ia  # Descomentar cuando el código esté en la rama
+# 8000 porque los servicios de Dokploy ya apuntan a ese puerto (el docstring del motor usa 8100).
+EXPOSE 8000
 
-EXPOSE 8100
+# Healthcheck en la imagen y no en un compose (convención del proyecto): en Dokploy el motor es una
+# Application construida con este Dockerfile, sin compose. /v1/healthz responde 200 sin token y sin
+# modelos. urlopen lanza excepción ante error o timeout → código de salida 1 → unhealthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["python", "-c", "import os, urllib.request as u; u.urlopen('http://127.0.0.1:%s/v1/healthz' % os.environ.get('PORT', '8000'), timeout=4)"]
 
-HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request, sys; urllib.request.urlopen('http://127.0.0.1:${PORT}/v1/healthz') or sys.exit(1)"
-
-# El 'exec' asegura que uvicorn reciba las señales de apagado de Docker correctamente
+# sh -c para expandir PORT; exec para que uvicorn sea PID 1 y reciba el SIGTERM del apagado.
+# Un solo proceso: el catálogo se carga en memoria al arrancar. Detrás del prefijo de Traefik
+# (Strip Path) responde en la raíz; UVICORN_ROOT_PATH solo hace falta para los enlaces de Swagger.
 CMD ["sh", "-c", "exec uvicorn motor_ia.main:crear_app --factory --host 0.0.0.0 --port ${PORT}"]
