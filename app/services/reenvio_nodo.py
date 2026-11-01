@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-55: evento sin sensor resoluble se descarta con la causa |
+# | 2026-11-01 | Arekkazu | RF-23/RF-55: sensor por defecto solo si ninguna variable trae `sensor` |
 """Mensajes del nodo que el broker reenvía a endpoints internos del backend (P2).
 
 - `vision` (BRK-03, D4): vector de comportamiento → `POST /iot/telemetria/vision`.
@@ -85,6 +86,14 @@ def _sensores_por_variable(
     return mapa
 
 
+def _sensores_declarados(variables: Any) -> list[str]:
+    """Nombres de `sensor` que trae el evento, sin repetir y en orden."""
+    if not isinstance(variables, list):
+        return []
+    nombres = (v.get("sensor") for v in variables if isinstance(v, dict))
+    return list(dict.fromkeys(n for n in nombres if n))
+
+
 async def evento_edge(serial: str, data: dict[str, Any]) -> None:
     """Evento clasificado por RF-55 en el Edge (AIOT-07), con `device_id` y `sensor_id`."""
     async with async_session_factory() as session:
@@ -97,6 +106,16 @@ async def evento_edge(serial: str, data: dict[str, Any]) -> None:
         por_variable = _sensores_por_variable(data.get("variables_involucradas"), sensores)
         # Raíz: la primaria; si no resolvió, la primera que sí.
         sensor_id = next((s for s in por_variable.values() if s is not None), None)
+        declarados = _sensores_declarados(data.get("variables_involucradas"))
+        if sensor_id is None and declarados:
+            # Misma regla que la telemetría: un nombre que no existe se rechaza, nunca se
+            # atribuye al sensor por defecto (ni siquiera con un único sensor activo).
+            logger.warning(
+                "Evento Edge de %s descartado: el dispositivo no tiene sensores llamados %s.",
+                serial,
+                declarados,
+            )
+            return
         if sensor_id is None:
             # Ninguna variable trae `sensor` (firmware anterior): la raíz sale de la misma
             # regla que la ingesta de telemetría, que solo resuelve si el dispositivo tiene un
