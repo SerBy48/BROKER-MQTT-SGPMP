@@ -4,6 +4,7 @@
 # | 2026-10-30 | Arekkazu | RF-66: inferencia individual ET-02 y entrega al backend (M2)     |
 # | 2026-10-31 | Arekkazu | RF-17 C3: la inferencia usa los rangos de M09 del paquete         |
 # | 2026-10-31 | SerBy48  | RF-66: log visible bajo uvicorn y activo inválido no tumba lote  |
+# | 2026-10-31 | Arekkazu | RF-66: docstring con el prefijo /model-ia-test definido          |
 """Motor de inferencia M04 (``motor-ia``): proceso aparte del gateway MQTT.
 
 Vive en este repo pero no comparte proceso con ``app``: una inferencia en CPU
@@ -26,7 +27,7 @@ Variables:
 
 El motor responde en cualquier dominio (no valida el Host) y en la raíz o detrás de un prefijo
 que quite el proxy (Strip Path). Para que Swagger arme bien sus URL detrás del prefijo:
-``uvicorn ... --root-path /motor-ia-test``.
+``uvicorn ... --root-path /model-ia-test`` (o ``UVICORN_ROOT_PATH``).
 """
 
 from __future__ import annotations

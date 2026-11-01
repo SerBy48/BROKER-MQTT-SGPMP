@@ -1,3 +1,10 @@
+## [0.4.0-rc.13](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.12...v0.4.0-rc.13) (2026-11-01)
+
+### Bug Fixes
+
+* **motor-ia:** imagen que construye, puerto 8000 y arranque sin catálogo ([789eb7b](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/789eb7ba1b87ea1c15b1d48b708c29bd95e5a700))
+* **motor-ia:** RF-66 respeta el puerto 8100 y los prefijos /model-ia-* del despliegue ([3fe7839](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/3fe78394acf447c227aa578b8bb24b7352dd3fec)), closes [#49](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/49)
+
 ## [0.4.0-rc.12](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.11...v0.4.0-rc.12) (2026-10-31)
 
 ### Features
