@@ -1,3 +1,9 @@
+## [0.4.0-rc.15](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.14...v0.4.0-rc.15) (2026-11-02)
+
+### Features
+
+* **motor-ia:** RF-66 artefactos de ET-02 en la imagen y catalogo.json por File Mount ([d54b4bf](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/d54b4bfedf316e6164cef49e2456f12c33214931))
+
 ## [0.4.0-rc.14](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.13...v0.4.0-rc.14) (2026-11-01)
 
 ### Bug Fixes
