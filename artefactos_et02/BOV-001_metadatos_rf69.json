@@ -1,0 +1,373 @@
+{
+  "tipo_modelo": "MODELO_ESPECIES_GRANDES",
+  "paradigma": "INDIVIDUAL",
+  "componente": null,
+  "metricas_validacion": {
+    "f1_score_global": 0.6168943810474189,
+    "recall_clase_riesgo_alto": 0.6763059701492538,
+    "precision_global": 0.6395431401415126,
+    "accuracy": 0.6808352766588933,
+    "recall_por_clase": {
+      "NINGUNA": 0.8403387703889585,
+      "ESTRES_TERMICO": 0.3968253968253968,
+      "DESHIDRATACION": 0.6527462551066727,
+      "RIESGO_ORIGEN_HIDRICO": 0.5208845208845209,
+      "HIPOTERMIA_ESTRES_FRIO": 0.7439446366782007,
+      "SEPTICEMIA": 0.6763059701492538,
+      "SINDROME_RESPIRATORIO_AGUDO": 0.5210396039603961
+    },
+    "matriz_confusion": [
+      [
+        2679,
+        90,
+        196,
+        115,
+        45,
+        1,
+        62
+      ],
+      [
+        26,
+        100,
+        19,
+        9,
+        0,
+        8,
+        90
+      ],
+      [
+        398,
+        48,
+        1438,
+        282,
+        0,
+        0,
+        37
+      ],
+      [
+        1,
+        104,
+        186,
+        424,
+        0,
+        12,
+        87
+      ],
+      [
+        71,
+        0,
+        2,
+        1,
+        215,
+        0,
+        0
+      ],
+      [
+        40,
+        57,
+        13,
+        8,
+        1,
+        725,
+        228
+      ],
+      [
+        172,
+        379,
+        115,
+        55,
+        2,
+        51,
+        842
+      ]
+    ],
+    "roc_auc_score": 0.9080294720318136
+  },
+  "dataset_entrenamiento_hash": "d4b1f83b0162daf5f5edbc63f0b6e0d72334973e91aa9cde11e965d2bfe25d72",
+  "fecha_entrenamiento": "2026-10-25T20:19:41.085310+00:00",
+  "version_referencia": null,
+  "compatibilidad_variables": [
+    "frecuencia_cardiaca",
+    "temperatura_corporal",
+    "actividad_indice"
+  ],
+  "id_proceso_rf71": "ed219d41-eca2-4b09-8d86-9acb1b7a8cac",
+  "formato": "ONNX",
+  "id_animal": "BOV-001",
+  "id_especie": "BOVINO",
+  "grupo_manejo": "ESPECIES_GRANDES",
+  "version_modelo": "MODELO_ESPECIES_GRANDES-BOV-001-ET02-v5.0.0-c0",
+  "version_pipeline": "ET02-v5.0.0",
+  "modo_generacion": null,
+  "estado_registro_rf69": "NO_REGISTRABLE_PENDIENTE_RFC010",
+  "motivo_no_registrable": [
+    "RFC010"
+  ],
+  "apto_despliegue_sombra": true,
+  "semilla": 42,
+  "semilla_generador": 1042,
+  "parametros_entrenamiento": {
+    "algoritmo": "XGBOOST",
+    "objective": "multi:softprob",
+    "num_class": 7,
+    "eval_metric": "mlogloss",
+    "n_estimators": 182,
+    "max_depth": 4,
+    "learning_rate": 0.1,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "reg_lambda": 3.0,
+    "reg_alpha": 0.0,
+    "gamma": 0.5,
+    "min_child_weight": 3,
+    "tree_method": "hist"
+  },
+  "linea_base_superada": {
+    "usada": "reglas_tabla51",
+    "f1": 0.3481,
+    "regla_rf57": 0.0752,
+    "reglas_tabla51": 0.3481
+  },
+  "brecha_entrenamiento_prueba": 0.0947,
+  "estabilidad_walk_forward": {
+    "estado": "OK",
+    "unidad_prueba": "ciclo",
+    "definicion_unidad": "ciclo = período mínimo que contiene las 7 clases (un episodio de cada patología + tramos sanos)",
+    "ciclos_entrenamiento": 3,
+    "dias_por_ciclo_prueba_media": 23.6,
+    "min_iteraciones": 4,
+    "umbral_sigma": 0.05,
+    "paso_ciclos": 1,
+    "max_iteraciones": 16,
+    "muestreo_uniforme_aplicado": false,
+    "iteraciones": 15,
+    "f1_media": 0.6184,
+    "f1_desv": 0.0429,
+    "clases_fijas": true
+  },
+  "f1_por_episodio": 0.8873,
+  "control_calidad_generador": {
+    "rangos": {
+      "valores_fuera_rango_plausible": {
+        "frecuencia_cardiaca": 0,
+        "temperatura_corporal": 0,
+        "actividad_indice": 0
+      },
+      "aprobado": true,
+      "fraccion_recortada_por_clase": {
+        "SINDROME_RESPIRATORIO_AGUDO": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.035
+        },
+        "SEPTICEMIA": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.0342
+        },
+        "HIPOTERMIA_ESTRES_FRIO": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.0274
+        },
+        "ESTRES_TERMICO": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.0214
+        },
+        "RIESGO_ORIGEN_HIDRICO": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.035
+        },
+        "DESHIDRATACION": {
+          "fc": 0.0,
+          "temp": 0.0,
+          "act": 0.0354
+        }
+      },
+      "fraccion_recortada_temperatura_max": 0.0,
+      "episodios_temp_recortada_mas_25pct": 0,
+      "fraccion_recortada_max_septicemia": 0.0,
+      "fraccion_piso_actividad_max": 0.0805,
+      "fraccion_piso_actividad_sanas": 0.0357,
+      "exceso_piso_actividad_sobre_sanas": 0.0448,
+      "fraccion_piso_actividad_umbral": 0.2,
+      "episodios_piso_actividad_sobre_umbral": 0,
+      "piso_actividad_por_clase": {
+        "SINDROME_RESPIRATORIO_AGUDO": 0.035,
+        "SEPTICEMIA": 0.0342,
+        "HIPOTERMIA_ESTRES_FRIO": 0.0274,
+        "ESTRES_TERMICO": 0.0214,
+        "RIESGO_ORIGEN_HIDRICO": 0.035,
+        "DESHIDRATACION": 0.0354
+      },
+      "aprobado_piso_actividad": true,
+      "recortes_fuera_de_episodio": 1427
+    },
+    "real_vs_sintetico": {
+      "auc": 0.6729,
+      "auc_simetrico": 0.6729,
+      "n_por_grupo": 545,
+      "aprobado": true,
+      "dias_reales": [
+        1,
+        3,
+        10,
+        12
+      ],
+      "dias_disjuntos": true
+    },
+    "sensibilidad": {
+      "f1_juego_entrenamiento": 0.6169,
+      "f1_juego_alternativo": 0.5227,
+      "caida": 0.0942,
+      "factor_magnitud": 0.75,
+      "factor_tiempo": 1.5,
+      "aprobado": true
+    },
+    "generador_valido": true,
+    "controles_fallidos": []
+  },
+  "fuente_datos": "SINTETICA",
+  "proporcion_sintetica": 1.0,
+  "features": [
+    "fc_media",
+    "temp_media",
+    "act_media",
+    "fc_z",
+    "temp_z",
+    "act_z",
+    "delta_temp",
+    "delta_fc",
+    "t_act",
+    "fc_sigma",
+    "temp_sigma",
+    "act_sigma",
+    "fase_circadiana_sen",
+    "fase_circadiana_cos"
+  ],
+  "clases": [
+    {
+      "idx": 0,
+      "codigo": "0",
+      "nombre": "NINGUNA"
+    },
+    {
+      "idx": 1,
+      "codigo": "1",
+      "nombre": "ESTRES_TERMICO"
+    },
+    {
+      "idx": 2,
+      "codigo": "2",
+      "nombre": "DESHIDRATACION"
+    },
+    {
+      "idx": 3,
+      "codigo": "3+4",
+      "nombre": "RIESGO_ORIGEN_HIDRICO"
+    },
+    {
+      "idx": 4,
+      "codigo": "5",
+      "nombre": "HIPOTERMIA_ESTRES_FRIO"
+    },
+    {
+      "idx": 5,
+      "codigo": "6",
+      "nombre": "SEPTICEMIA"
+    },
+    {
+      "idx": 6,
+      "codigo": "7",
+      "nombre": "SINDROME_RESPIRATORIO_AGUDO"
+    }
+  ],
+  "mapeo_clases_rf64": {
+    "NINGUNA": [
+      0
+    ],
+    "ESTRES_TERMICO": [
+      1
+    ],
+    "DESHIDRATACION": [
+      2
+    ],
+    "RIESGO_ORIGEN_HIDRICO": [
+      3,
+      4
+    ],
+    "HIPOTERMIA_ESTRES_FRIO": [
+      5
+    ],
+    "SEPTICEMIA": [
+      6
+    ],
+    "SINDROME_RESPIRATORIO_AGUDO": [
+      7
+    ]
+  },
+  "rangos_especie": {
+    "rango_sano": {
+      "frecuencia_cardiaca": [
+        40.0,
+        120.0
+      ],
+      "temperatura_corporal": [
+        38.0,
+        39.5
+      ],
+      "actividad_indice": [
+        0.0,
+        1.0
+      ]
+    },
+    "rango_plausible": {
+      "frecuencia_cardiaca": [
+        30.0,
+        160.0
+      ],
+      "temperatura_corporal": [
+        35.0,
+        43.0
+      ],
+      "actividad_indice": [
+        0.0,
+        1.0
+      ]
+    },
+    "rango_sano_fuente": {
+      "frecuencia_cardiaca": "M09 V3.0 — catálogo de variables (temperatura corporal 37–40 °C, FC 40–120 bpm)",
+      "temperatura_corporal": "M04 V2.0 — ficha ESPECIES_GRANDES: «rangos sanos de especie» bovino adulto, temperatura corporal 38.0–39.5 °C",
+      "actividad_indice": "I3P-1 — índice de actividad normalizado a [0, 1] por construcción"
+    },
+    "rango_plausible_fuente": {
+      "frecuencia_cardiaca": "v0.1 (propuesta inicial), recuperado como rango plausible por SC-I-04 R3-01 — confirmar con I3P-1 (C3)",
+      "temperatura_corporal": "v0.1 (propuesta inicial), recuperado como rango plausible por SC-I-04 R3-01 — confirmar con I3P-1 (C3)",
+      "actividad_indice": "I3P-1 — índice de actividad normalizado a [0, 1] por construcción"
+    }
+  },
+  "commit_git": "a041f82",
+  "hash_codigo_pipeline": "aa765be6072f3130aaeb96a9b607bdcbbf0fa28c2112faa45edcee09a843d5bb",
+  "versiones_entorno": {
+    "python": "3.13.17",
+    "xgboost": "3.4.1",
+    "scikit-learn": "1.9.1",
+    "imbalanced-learn": "0.14.2",
+    "numpy": "2.5.3",
+    "pandas": "3.0.5",
+    "onnx": "1.23.2",
+    "onnxmltools": "1.16.0",
+    "onnxruntime": "1.29.0"
+  },
+  "alertas": [],
+  "hash_artefacto_modelo": "d7a5f641601c7e45ad219dd18584b4e4fd1f0896fd69b04a3bdc5a229852dd7c",
+  "regla_retiro": {
+    "fuente_datos_modelo": "SINTETICA",
+    "rho_objetivo": 1.0,
+    "proporcion_sintetica": 1.0,
+    "retiro_total": false,
+    "clases_con_sinteticos_residuales": []
+  }
+}

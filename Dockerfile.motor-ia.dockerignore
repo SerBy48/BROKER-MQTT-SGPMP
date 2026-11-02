@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-31 | Arekkazu | RF-66: excluye modelos/ (artefactos locales, van por volumen)    |
+# | 2026-11-02 | Arekkazu | RF-66: deja entrar artefactos_et02/ (provisional hasta B2/M3)    |
 # Solo para Dockerfile.motor-ia (BuildKit usa <Dockerfile>.dockerignore si existe; el
 # .dockerignore del broker no se toca). La imagen copia pyproject.toml, README.md, app/ y motor_ia/.
 .git
@@ -19,6 +20,8 @@ modelos/
 *.onnx
 *.pt
 *.pkl
+# Única excepción: los artefactos de ET-02 que copia la imagen (provisional, ver Dockerfile.motor-ia).
+!artefactos_et02/
 *.pyc
 __pycache__
 .pytest_cache
