@@ -5,7 +5,7 @@ construidas con `Dockerfile.motor-ia`). Es un procedimiento provisional (RF-66):
 existan la entrega de artefactos del backend (B2) y la descarga con caché del motor (M3). Desde
 ese momento el motor bajará solo las versiones activas de RF-69 de su ambiente.
 
-## Por qué no van en git ni en la imagen
+## Por qué no van en git ni en la imagen (regla general)
 
 - Son binarios (`.onnx`) y pesan: solo los poblacionales suman 53 MB. Cada versión nueva inflaría
   el historial para siempre.
@@ -14,8 +14,32 @@ ese momento el motor bajará solo las versiones activas de RF-69 de su ambiente.
 - Un File Mount de Dokploy (como el `firebase.json` del backend) tampoco sirve: es texto que se
   pega en un editor, y un `.onnx` es binario.
 
-Por eso `Dockerfile.motor-ia.dockerignore` excluye `*.onnx`/`*.pt`/`modelos/`, y `.gitignore`
-excluye `modelos/`.
+Por eso `Dockerfile.motor-ia.dockerignore` excluye `**/*.onnx`/`**/*.pt`/`modelos/` (con la única
+excepción de `artefactos_et02/`, abajo), y `.gitignore` excluye `modelos/`.
+
+### Excepción provisional: `artefactos_et02/` (sin acceso al servidor)
+
+Cuando no hay acceso SSH al servidor de Dokploy para el Bind Mount, los artefactos de ET-02
+(`<ANIMAL>.onnx`, `<ANIMAL>_linea_base.json`, `<ANIMAL>_metadatos_rf69.json`) van en
+`artefactos_et02/` y la imagen los copia a `/data/modelos/`. Son iguales en todos los ambientes.
+Solo entran los animales que RF-69 deja en sombra o activo (hoy BOV-001), nunca los poblacionales.
+
+`catalogo.json` sí cambia por ambiente (IDs de su BD) y es texto, así que va como **File Mount**
+de la Application:
+
+- *Advanced* → *Volumes / Mounts* → *Add* → **File Mount**, Mount Path `/data/modelos/catalogo.json`,
+  contenido = el `catalogo.json` que genera `scripts/registrar_modelos_et02.py` del backend.
+- *Environment*: `MOTOR_IA_DIR_MODELOS=/data/modelos` y `BACKEND_URL` (además del token).
+- Sin el File Mount ni la variable, el motor arranca sin modelos como antes.
+- Cada entrada de `catalogo.json` debe tener sus tres archivos en `artefactos_et02/`. Si falta
+  alguno, el motor no arranca (`CatalogoInvalidoError`, reinicio en bucle).
+- No combinar con el Bind Mount de `/data/modelos`: el Bind Mount tapa los artefactos de la imagen.
+
+Agregar o cambiar un animal obliga a: (1) PR con los artefactos y reconstruir la imagen;
+(2) registrar la versión en RF-69 de cada ambiente con `registrar_modelos_et02.py`; (3) actualizar
+el File Mount de cada ambiente con el `catalogo.json` resultante. El motor no compara
+`id_version_modelo` con el artefacto: si se omite el paso 3, arranca y atribuye los resultados a
+la versión anterior. La excepción se elimina cuando llegue M3.
 
 ## Qué se sube
 
@@ -80,9 +104,9 @@ los definidos desde el PR #49 y no cambian: puerto **8100** (Container Port del 
 
 ## Cambiar o agregar un modelo
 
-El catálogo se lee **solo al arrancar**. Para actualizar: copiar los archivos nuevos a la carpeta
-del servidor (paso 1), editar `catalogo.json` y hacer *Restart* de la Application. No hace falta
-reconstruir la imagen.
+El catálogo se lee **solo al arrancar**. Con el Bind Mount: copiar los archivos nuevos a la carpeta
+del servidor (paso 1), editar `catalogo.json` y hacer *Restart* de la Application; no hace falta
+reconstruir la imagen. Con la excepción de `artefactos_et02/` sí hace falta (ver arriba).
 
 Para dejar el motor sin modelos, se borra `MOTOR_IA_DIR_MODELOS` y se reinicia. Ojo: si la variable
 está definida y falta `catalogo.json`, el motor no arranca. Un catálogo vacío válido es
