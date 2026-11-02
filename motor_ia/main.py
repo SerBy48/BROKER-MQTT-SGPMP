@@ -5,6 +5,7 @@
 # | 2026-10-31 | Arekkazu | RF-17 C3: la inferencia usa los rangos de M09 del paquete         |
 # | 2026-10-31 | SerBy48  | RF-66: log visible bajo uvicorn y activo inválido no tumba lote  |
 # | 2026-10-31 | Arekkazu | RF-66: docstring con el prefijo /model-ia-test definido          |
+# | 2026-11-02 | Arekkazu | RF-66/RF-69: catálogo desde el backend con MOTOR_IA_SINCRONIZACION_S |
 """Motor de inferencia M04 (``motor-ia``): proceso aparte del gateway MQTT.
 
 Vive en este repo pero no comparte proceso con ``app``: una inferencia en CPU
@@ -22,8 +23,14 @@ Variables:
 - ``BACKEND_URL``: URL base del backend en cualquier dominio, con su prefijo
   (``https://api.inmero.co/api-sgpmp-test``, ``https://api.arekkazu.top``…). Obligatoria
   si hay modelos: ahí se entregan los resultados.
+- ``MOTOR_IA_SINCRONIZACION_S``: cada cuántos segundos el motor arma su catálogo desde el
+  backend (``motor_ia.sincronizacion``): un animal individual nuevo se atiende solo, sin
+  ``catalogo.json``. ``0`` (por defecto) → catálogo fijo de ``MOTOR_IA_DIR_MODELOS``; así un
+  ambiente cuyo backend aún no tiene ``/prediccion/motor`` sigue igual.
+- ``MOTOR_IA_CALIBRACION_HORAS``: horas de lecturas aptas para la línea base propia de un animal
+  (168 = 7 días, el mínimo de ET-02). Solo con la sincronización.
 - ``MOTOR_IA_DIR_MODELOS``: carpeta con ``catalogo.json`` y los artefactos de ET-02
-  (ver ``motor_ia.individual``). Vacía → sin modelos.
+  (ver ``motor_ia.individual``). Vacía → sin modelos. Se ignora con la sincronización.
 
 El motor responde en cualquier dominio (no valida el Host) y en la raíz o detrás de un prefijo
 que quite el proxy (Strip Path). Para que Swagger arme bien sus URL detrás del prefijo:
@@ -34,6 +41,8 @@ from __future__ import annotations
 
 import logging
 import secrets
+import threading
+import time
 from typing import Any
 
 import httpx
@@ -42,8 +51,13 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from motor_ia.backend import BackendNoDisponibleError, BackendResultadosClient
+from motor_ia.backend import (
+    BackendCatalogoClient,
+    BackendNoDisponibleError,
+    BackendResultadosClient,
+)
 from motor_ia.individual import a_resultado_rf66, cargar_catalogo, inferir
+from motor_ia.sincronizacion import SincronizadorCatalogo
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +70,8 @@ class MotorIASettings(BaseSettings):
     iot_inferencia_m04_token: str = ""
     motor_ia_dir_modelos: str = ""
     backend_url: str = ""
+    motor_ia_sincronizacion_s: int = 0
+    motor_ia_calibracion_horas: float = 168.0
 
 
 class LotePaquetes(BaseModel):
@@ -77,9 +93,26 @@ def crear_app(
         raise RuntimeError("Falta IOT_INFERENCIA_M04_TOKEN: el motor no arranca sin token.")
     esperado = settings.iot_inferencia_m04_token.encode("utf-8")
 
-    modelos = cargar_catalogo(settings.motor_ia_dir_modelos)
+    sincronizador = None
+    modelos = {}
+    if settings.motor_ia_sincronizacion_s > 0:
+        if not settings.backend_url:
+            raise RuntimeError("Falta BACKEND_URL: el motor arma su catálogo desde el backend.")
+        sincronizador = SincronizadorCatalogo(
+            BackendCatalogoClient(
+                settings.backend_url, settings.iot_inferencia_m04_token, transport_backend
+            ),
+            settings.motor_ia_calibracion_horas,
+        )
+        _sincronizar_siempre(sincronizador, settings.motor_ia_sincronizacion_s)
+    else:
+        modelos = cargar_catalogo(settings.motor_ia_dir_modelos)
+
+    def catalogo() -> dict:
+        return sincronizador.modelos if sincronizador else modelos
+
     backend = None
-    if modelos:
+    if modelos or sincronizador:
         if not settings.backend_url:
             raise RuntimeError(
                 "Falta BACKEND_URL: hay modelos cargados y no hay dónde entregar resultados."
@@ -87,9 +120,16 @@ def crear_app(
         backend = BackendResultadosClient(
             settings.backend_url, settings.iot_inferencia_m04_token, transport_backend
         )
-        logger.info(
-            "RF-66: %d modelo(s) cargado(s); resultados hacia %s", len(modelos), backend.url
-        )
+        if sincronizador:
+            logger.info(
+                "RF-66: catálogo desde el backend cada %d s; resultados hacia %s",
+                settings.motor_ia_sincronizacion_s,
+                backend.url,
+            )
+        else:
+            logger.info(
+                "RF-66: %d modelo(s) cargado(s); resultados hacia %s", len(modelos), backend.url
+            )
 
     def exigir_token(authorization: str | None = Header(default=None)) -> None:
         if not authorization or not authorization.startswith(_PREFIJO):
@@ -115,15 +155,22 @@ def crear_app(
 
     @app.get("/v1/healthz")
     def healthz() -> dict:
-        return {
+        estado = {
             "status": "ok",
-            "modelos_cargados": len(modelos),
+            "modelos_cargados": len(catalogo()),
             "backend": backend.url if backend else None,
         }
+        if sincronizador:
+            estado["sincronizacion"] = {
+                "ultima": sincronizador.ultima.isoformat() if sincronizador.ultima else None,
+                "calibrando": sorted(i for i, m in catalogo().items() if m.calibrando),
+            }
+        return estado
 
     @app.post("/v1/paquetes", dependencies=[Depends(exigir_token)])
     def recibir_paquetes(lote: LotePaquetes) -> JSONResponse:
-        if backend is None:
+        modelos = catalogo()
+        if backend is None or (sincronizador and sincronizador.ultima is None):
             # Un 2xx haría que el backend los marque ENVIADO y se perderían sin inferir.
             return JSONResponse(
                 status_code=503,
@@ -173,3 +220,17 @@ def crear_app(
         )
 
     return app
+
+
+def _sincronizar_siempre(sincronizador: SincronizadorCatalogo, cada_s: int) -> None:
+    """Hilo aparte: una inferencia no espera a la sincronización ni al revés."""
+
+    def bucle() -> None:
+        while True:
+            try:
+                sincronizador.sincronizar()
+            except Exception as exc:  # noqa: BLE001 — backend caído: se conserva el catálogo
+                logger.warning("Catálogo: no se pudo sincronizar con el backend (%r)", exc)
+            time.sleep(cada_s)
+
+    threading.Thread(target=bucle, name="catalogo-motor", daemon=True).start()
