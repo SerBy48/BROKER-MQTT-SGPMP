@@ -2,6 +2,7 @@
 # |------------|----------|-------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-22: evento sin sensor resoluble: mensaje con la causa |
 # | 2026-11-01 | Arekkazu | RF-23/RF-55: nombre inexistente no cae al único sensor |
+# | 2026-11-02 | Arekkazu | RF-53: la captura de la cámara va aparte del sobre D4 |
 """BRK-03/04/08 (D4, D5 y D6 de AIOT-DEV-03): los topics `vision`, `evento` y
 `ota/<evento>` se reenvían a su endpoint interno del backend, con el serial del topic."""
 
@@ -96,6 +97,19 @@ async def test_vision_se_reenvia_con_el_sobre_de_d4(enviados) -> None:
              "version_cascada": {"detector": "v3"}}
     await _publicar("sgpmp/CAM-1/vision", sobre)
     assert enviados == [("/iot/telemetria/vision", {**sobre, "serial": "CAM-1"})]
+
+
+async def test_la_captura_va_aparte_y_el_sobre_d4_sale_sin_ella(enviados) -> None:
+    fin = "2026-11-02T14:08:36Z"
+    sobre = {"area_id": 7, "ventana_inicio": "2026-11-02T14:08:16Z", "ventana_fin": fin,
+             "n_individuos_observados": 6, "componentes": {"tasa_movimiento": 0.13}}
+    await _publicar("sgpmp/CAM-1/vision", {**sobre, "captura": "/9j/4AAQ"})
+    captura = {"serial": "CAM-1", "area_id": 7, "ventana_fin": fin,
+               "n_individuos_observados": 6, "imagen_jpeg_base64": "/9j/4AAQ"}
+    assert sorted(enviados, key=str) == sorted([
+        ("/iot/telemetria/vision", {**sobre, "serial": "CAM-1"}),
+        ("/iot/telemetria/vision/captura", captura),
+    ], key=str)
 
 
 def _variable(tipo: str, sensor: str | None) -> dict:
