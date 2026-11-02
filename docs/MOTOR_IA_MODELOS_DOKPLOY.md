@@ -22,7 +22,7 @@ excepción de `artefactos_et02/`, abajo), y `.gitignore` excluye `modelos/`.
 Cuando no hay acceso SSH al servidor de Dokploy para el Bind Mount, los artefactos de ET-02
 (`<ANIMAL>.onnx`, `<ANIMAL>_linea_base.json`, `<ANIMAL>_metadatos_rf69.json`) van en
 `artefactos_et02/` y la imagen los copia a `/data/modelos/`. Son iguales en todos los ambientes.
-Solo entran los animales que RF-69 deja en sombra o activo (hoy BOV-001), nunca los poblacionales.
+Solo entran los animales que RF-69 deja en sombra o activo (hoy BOV-001 y TER-001), nunca los poblacionales.
 
 `catalogo.json` sí cambia por ambiente (IDs de su BD) y es texto, así que va como **File Mount**
 de la Application:
