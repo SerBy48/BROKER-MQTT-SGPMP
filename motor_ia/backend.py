@@ -2,6 +2,7 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-30 | Arekkazu | RF-66: el motor entrega sus resultados al backend (M2)           |
 # | 2026-10-31 | SerBy48  | RF-66: 403 y 404 de ruta o proxy se reintentan, no se consumen   |
+# | 2026-11-02 | Arekkazu | RF-66/RF-69: cliente del catálogo del motor (rutas /prediccion/motor) |
 """Cliente motor → backend: ``POST {BACKEND_URL}/prediccion/inferencias``.
 
 ``BACKEND_URL`` es la URL base del backend en cualquier dominio, con su prefijo si lo tiene
@@ -91,3 +92,41 @@ class BackendResultadosClient:
             return False
         # Token desalineado, proxy, ruta errada, 408, 429 y 5xx: que el backend reintente.
         raise BackendNoDisponibleError(f"el backend respondió HTTP {r.status_code}")
+
+
+class BackendCatalogoClient:
+    """Motor → backend para armar el catálogo solo: ``{BACKEND_URL}/prediccion/motor/*``.
+
+    Cualquier fallo sale como excepción de httpx: quien sincroniza conserva lo que ya tenía.
+    """
+
+    def __init__(
+        self, url_base: str, token: str, transport: httpx.BaseTransport | None = None
+    ) -> None:
+        self._base = f"{normalizar_url_base(url_base)}/prediccion/motor"
+        self._headers = {"Authorization": f"Bearer {token}"}
+        self._transport = transport
+
+    def _pedir(self, metodo: str, ruta: str, **kw) -> httpx.Response:
+        with httpx.Client(
+            timeout=_TIMEOUT_S * 3, transport=self._transport, follow_redirects=False
+        ) as c:
+            r = c.request(metodo, f"{self._base}{ruta}", headers=self._headers, **kw)
+        r.raise_for_status()
+        return r
+
+    def catalogo(self) -> list[dict]:
+        """Animales a atender: ``{id_activo_biologico, tipo_modelo, version | None}``."""
+        return self._pedir("GET", "/catalogo").json()["animales"]
+
+    def asignar_version(self, id_activo: int) -> dict:
+        """Versión propia en SOMBRA para un animal que no tiene (RFC-010); idempotente."""
+        return self._pedir("POST", f"/activos/{id_activo}/version").json()
+
+    def artefacto(self, id_version: int) -> bytes:
+        return self._pedir("GET", f"/versiones/{id_version}/artefacto").content
+
+    def lecturas(self, id_activo: int, horas: float) -> list[dict]:
+        return self._pedir(
+            "GET", f"/activos/{id_activo}/lecturas", params={"horas": horas}
+        ).json()["lecturas"]

@@ -4,6 +4,7 @@
 # | 2026-10-31 | Arekkazu | RF-17 C3: rangos sano/plausible de M09 en lugar de los de ET-02  |
 # | 2026-10-31 | SerBy48  | RF-66: timestamps uniformes, lecturas inválidas y log sin result |
 # | 2026-10-31 | SerBy48  | RF-17 C3: banda plausible de M09 apagada hasta tener campos propios |
+# | 2026-11-02 | Arekkazu | RF-66: un animal calibrando sale con contexto_incompleto |
 """Inferencia individual (ET-02) por activo y su conversión a la Salida de RF-66.
 
 Catálogo local de modelos (``MOTOR_IA_DIR_MODELOS/catalogo.json``) mientras no existan
@@ -56,6 +57,8 @@ class ModeloAnimal:
     id_version_modelo: int
     linea_base: et02.LineaBase
     artefacto: et02.ArtefactoModelo
+    #: Usa la línea base de referencia de su tipo mientras junta lecturas propias (sincronizacion).
+    calibrando: bool = False
 
 
 def cargar_catalogo(directorio: str) -> dict[int, ModeloAnimal]:
@@ -303,7 +306,8 @@ def a_resultado_rf66(
         "codigo_patologia_rf64": contrato["enfermedad_estimada"],
         "probabilidad_enfermedad": contrato["probabilidad_enfermedad"],
         "confianza_global": contrato["confianza"],
-        "contexto_incompleto": decision["contexto_incompleto"],
+        # Calibrando: la desviación se mide contra la línea base de referencia, no la del animal.
+        "contexto_incompleto": decision["contexto_incompleto"] or modelo.calibrando,
         "modo_ejecucion": "SERVIDOR",
         "latencia_ms": contrato["latencia_ms"],
         "fecha_inicio_ventana": contrato["ventana_inicio"],
