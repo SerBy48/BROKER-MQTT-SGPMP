@@ -2,9 +2,12 @@
 # |------------|----------|-------------|
 # | 2026-11-01 | Arekkazu | RF-23/RF-55: evento sin sensor resoluble se descarta con la causa |
 # | 2026-11-01 | Arekkazu | RF-23/RF-55: sensor por defecto solo si ninguna variable trae `sensor` |
+# | 2026-11-02 | Arekkazu | RF-53: la captura de la cámara se separa del vector de visión |
 """Mensajes del nodo que el broker reenvía a endpoints internos del backend (P2).
 
-- `vision` (BRK-03, D4): vector de comportamiento → `POST /iot/telemetria/vision`.
+- `vision` (BRK-03, D4): vector de comportamiento → `POST /iot/telemetria/vision`. Si el nodo
+  manda además `captura` (último cuadro con las cajas, JPEG base64), va aparte a
+  `POST /iot/telemetria/vision/captura`: no es parte de D4 y el backend la rechazaría ahí.
 - `evento` (BRK-04, D5): eventos Edge de RF-55 → `POST /iot/eventos-edge`.
 - `ota/<evento>` (BRK-08, D6): reportes de la OTA de modelos →
   `POST /prediccion/ota/reportes`.
@@ -31,6 +34,7 @@ from app.services import reenvio
 logger = logging.getLogger(__name__)
 
 RUTA_VISION = "/iot/telemetria/vision"
+RUTA_VISION_CAPTURA = "/iot/telemetria/vision/captura"
 RUTA_EVENTOS_EDGE = "/iot/eventos-edge"
 RUTA_REPORTES_OTA = "/prediccion/ota/reportes"
 
@@ -56,9 +60,19 @@ def _con_serial_del_topic(serial: str, data: dict[str, Any], tipo: str) -> dict[
 
 
 def vision(serial: str, data: dict[str, Any]) -> None:
-    """Sobre de D4 tal cual (componentes, calidad, version_cascada, ventana)."""
-    cuerpo = _con_serial_del_topic(serial, data, "vision")
+    """Sobre de D4 tal cual (componentes, calidad, version_cascada, ventana); la captura, aparte."""
+    captura = data.get("captura")
+    sobre = {k: v for k, v in data.items() if k != "captura"}
+    cuerpo = _con_serial_del_topic(serial, sobre, "vision")
     reenvio.reenviar(RUTA_VISION, cuerpo, f"Vector de visión de {serial}")
+    if isinstance(captura, str):
+        reenvio.reenviar(RUTA_VISION_CAPTURA, {
+            "serial": serial,
+            "area_id": sobre.get("area_id"),
+            "ventana_fin": sobre.get("ventana_fin"),
+            "n_individuos_observados": sobre.get("n_individuos_observados"),
+            "imagen_jpeg_base64": captura,
+        }, f"Captura de visión de {serial}")
 
 
 def _sensores_por_variable(
