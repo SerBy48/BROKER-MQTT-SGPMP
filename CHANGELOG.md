@@ -1,3 +1,9 @@
+## [0.4.0-rc.16](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.15...v0.4.0-rc.16) (2026-11-02)
+
+### Features
+
+* **motor-ia:** RF-66 artefactos de ET-02 TER-001 en la imagen ([fe24f0a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/fe24f0aea1ceb0103995cd6025ae57e6d065aa74))
+
 ## [0.4.0-rc.15](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.14...v0.4.0-rc.15) (2026-11-02)
 
 ### Features
