@@ -1,3 +1,9 @@
+## [0.4.0-rc.17](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.16...v0.4.0-rc.17) (2026-11-02)
+
+### Features
+
+* **rf-53:** la captura de la cámara se reenvía aparte del sobre de visión D4 ([962353d](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/962353db848ac1e4aede1129f61416ab03fc09c2))
+
 ## [0.4.0-rc.16](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.15...v0.4.0-rc.16) (2026-11-02)
 
 ### Features
