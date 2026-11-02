@@ -1,3 +1,9 @@
+## [0.4.0-rc.18](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.17...v0.4.0-rc.18) (2026-11-02)
+
+### Features
+
+* **motor-ia:** el motor arma su catálogo desde el backend y calibra solo a cada animal ([6d81179](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/6d8117997abd640d678923fbbc9bdb5f99bf8230))
+
 ## [0.4.0-rc.17](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.16...v0.4.0-rc.17) (2026-11-02)
 
 ### Features
