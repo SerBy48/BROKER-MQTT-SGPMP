@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo                                                     |
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-31 | Arekkazu | RF-66: vuelve al puerto 8100 definido para el despliegue        |
+# | 2026-11-02 | Arekkazu | RF-66: artefactos ET-02 en la imagen; catalogo.json por File Mount |
 # Imagen del motor de inferencia M04 (motor_ia/, RF-66). Servicio aparte del broker: en Dokploy
 # es una Application propia por ambiente (motor-ia-dev / -test / -main) que construye este archivo.
 #
@@ -56,6 +57,12 @@ RUN /usr/local/bin/python -m pip uninstall -y pip \
     && useradd --uid 1001 --no-create-home --shell /usr/sbin/nologin motoria \
     && mkdir -p /data/modelos \
     && chown 1001:1001 /data/modelos
+
+# Provisional hasta B2/M3 (descarga desde RF-69): los artefactos de ET-02 vienen en la imagen
+# porque en el servidor de Dokploy no hay acceso para un Bind Mount. Son los mismos en todos los
+# ambientes. catalogo.json NO va aquí: lleva los IDs de cada BD y se monta como File Mount en
+# /data/modelos/catalogo.json (docs/MOTOR_IA_MODELOS_DOKPLOY.md).
+COPY --chown=1001:1001 artefactos_et02/ /data/modelos/
 
 USER 1001
 
