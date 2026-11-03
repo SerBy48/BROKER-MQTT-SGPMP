@@ -1,3 +1,10 @@
+## [0.4.0-rc.19](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.18...v0.4.0-rc.19) (2026-11-03)
+
+### Features
+
+* **rf-71:** hilo reentrenador del motor de ia que reporta fases al backend ([b5ba41c](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b5ba41c3e040e6d58e2854b73c63c3f4b7384219))
+* **rf-71:** pipeline de entrenamiento del modelo individual en el motor de ia ([a736c8e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a736c8e1b94a8dd80292bfe9f0eb59321e7c1834))
+
 ## [0.4.0-rc.18](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.17...v0.4.0-rc.18) (2026-11-02)
 
 ### Features
