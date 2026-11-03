@@ -2,6 +2,7 @@
 # |------------|----------|-----------------------------------------------------------------|
 # | 2026-10-31 | Arekkazu | RF-66: vuelve al puerto 8100 definido para el despliegue        |
 # | 2026-11-02 | Arekkazu | RF-66: artefactos ET-02 en la imagen; catalogo.json por File Mount |
+# | 2026-11-03 | Arekkazu | AJF-14 RF-71: build arg para la imagen que reentrena (extra de entrenamiento) |
 # Imagen del motor de inferencia M04 (motor_ia/, RF-66). Servicio aparte del broker: en Dokploy
 # es una Application propia por ambiente (motor-ia-dev / -test / -main) que construye este archivo.
 #
@@ -15,6 +16,13 @@ ARG PYTHON_IMAGE=python:3.13-slim@sha256:2d44738ebf4ce5f63b9d9ea871e9c7cfdc0426f
 # ── builder: instala el paquete y el extra [motor-ia] en un venv ──────────────────────────────
 FROM ${PYTHON_IMAGE} AS builder
 
+# AJF-14 (RF-71): la imagen que reentrena se construye con
+#   --build-arg MOTOR_IA_EXTRAS=motor-ia,motor-ia-entrenamiento
+# (xgboost, scikit-learn, imbalanced-learn, onnxmltools: ~250 MB más). Sin él, el reentrenador
+# cierra cada proceso FALLIDO con ENTRENAMIENTO_NO_DISPONIBLE. Se quita NCCL (~350 MB), que
+# xgboost solo usa en GPU: el entrenamiento corre en CPU.
+ARG MOTOR_IA_EXTRAS=motor-ia
+
 WORKDIR /src
 
 RUN python -m venv /opt/venv
@@ -27,7 +35,8 @@ COPY app ./app
 COPY motor_ia ./motor_ia
 # pip se desinstala del venv al terminar: el motor no lo usa en ejecución y sus copias
 # vendorizadas (urllib3, msgpack) aparecen en trivy como HIGH.
-RUN /opt/venv/bin/pip install --no-cache-dir ".[motor-ia]" \
+RUN /opt/venv/bin/pip install --no-cache-dir ".[${MOTOR_IA_EXTRAS}]" \
+    && (/opt/venv/bin/python -m pip uninstall -y nvidia-nccl-cu12 nvidia-nccl-cu13 || true) \
     && /opt/venv/bin/python -m pip uninstall -y pip
 
 # ── final: solo el venv, sin el código fuente ni herramientas de construcción ─────────────────

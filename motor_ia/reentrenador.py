@@ -1,6 +1,7 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
 # | 2026-11-02 | Arekkazu | AJF-14 RF-71: hilo reentrenador: toma procesos, entrena en un subproceso y reporta fases |
+# | 2026-11-03 | Arekkazu | AJF-14 RF-69 P-6: registra con las variables I3P-1 de la versión de referencia |
 """Reentrenador del motor de IA (AJF-14, M-3).
 
 Un hilo que, cada ``MOTOR_IA_REENTRENAMIENTO_S`` segundos, pide al backend un proceso pendiente y lo
@@ -59,7 +60,9 @@ class _Recursos:
                 cpu = round(min(100.0, max(0.0, (ticks - c0) / max(ahora - t0, 1e-6) * 100)), 2)
             self._cpu_prev = (ahora, ticks)
             with open(f"/proc/{self.pid}/status", encoding="ascii") as f:
-                rss = next((int(l.split()[1]) for l in f if l.startswith("VmRSS:")), None)
+                rss = next(
+                    (int(fila.split()[1]) for fila in f if fila.startswith("VmRSS:")), None
+                )
             return cpu, (rss // 1024 if rss is not None else None)
         except (OSError, ValueError, IndexError):
             return None, None
@@ -134,6 +137,8 @@ class Reentrenador:
         motivos: list[str] = []
         if self._dias < 14:
             motivos.append(f"Calibración con {self._dias:g} días de lecturas (ET-02 pide 14).")
+        # ET-02 exige 7 días sanos para la línea base; en DEV se baja con los días de calibración.
+        dias_minimos = min(7.0, self._dias)
         if not lecturas:
             self._cerrar_fallido(
                 id_proceso,
@@ -155,6 +160,8 @@ class Reentrenador:
                 "retroalimentaciones": retros,
                 "id_proceso": id_proceso,
                 "version_referencia": proceso.get("id_version_modelo_referencia"),
+                "tipo_modelo": proceso["tipo_modelo"],
+                "dias_minimos": dias_minimos,
             },
         )
         recursos = _Recursos(hijo.pid) if getattr(hijo, "pid", None) else None
@@ -225,7 +232,11 @@ class Reentrenador:
             "fecha_entrenamiento": str(
                 m.get("fecha_entrenamiento") or datetime.now(UTC).isoformat()
             ),
-            "compatibilidad_variables": json.dumps(m.get("compatibilidad_variables") or []),
+            # RF-69 pide ids I3P-1; el pipeline solo conoce nombres. El contrato de variables no
+            # cambia entre versiones: se usan los de la versión vigente del animal.
+            "compatibilidad_variables": json.dumps(
+                proceso.get("compatibilidad_variables_referencia") or []
+            ),
             "id_proceso_rf71": proceso["id_proceso_reentrenamiento"],
             "id_activo_biologico": str(proceso["id_activo_biologico"]),
             "fuente_datos": str(m.get("fuente_datos") or "SINTETICA"),

@@ -1,10 +1,11 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
 # | 2026-11-02 | Arekkazu | AJF-14 RF-71: el reentrenador recorre las 7 fases contra un backend falso |
-"""M-5: un pipeline de ET-02 de mentira (mismas funciones y contrato) y un backend en memoria.
+# | 2026-11-03 | Arekkazu | AJF-14 RF-71 P-6: tipo de modelo, días mínimos e ids I3P-1 de la referencia |
+"""M-5: un pipeline de mentira (mismas funciones y contrato) y un backend en memoria.
 
-El pipeline real (``motor_ia.entrenamiento_et02``) no está en el repo todavía (P-6); aquí se
-inyecta uno corto en ``sys.modules`` para probar el recorrido, el reporte de fases y los cierres.
+Aquí se inyecta un pipeline corto en ``sys.modules`` para probar el recorrido, el reporte de fases
+y los cierres sin entrenar; el pipeline real se prueba en ``test_motor_ia_entrenamiento_et02.py``.
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ PROCESO = {
     "nombre_especie": "Bovino",
     "tipo_modelo": "MODELO_ESPECIES_GRANDES",
     "id_version_modelo_referencia": 7,
+    "compatibilidad_variables_referencia": [11, 12, 13],
 }
 METADATOS = {
     "metricas_validacion": {
@@ -101,6 +103,8 @@ def _pipeline(monkeypatch, *, falla_con=None, metadatos=METADATOS):
 
     def entrenar_modelo_individual(**kw):
         assert kw["entrenar_contrastes"] is False and kw["n_verificadas_rf72"] == 1
+        assert kw["tipo_modelo"] == "MODELO_ESPECIES_GRANDES" and kw["especie"] == "Bovino"
+        mod.dias_minimos = kw["dias_minimos"]
         mod.calibrar_animal()
         mod.generar_linea_temporal_sintetica()
         if falla_con:
@@ -141,7 +145,18 @@ def test_recorre_las_siete_fases_y_registra_la_version(monkeypatch):
         and formulario["version_referencia"] == "7"
         and onnx == b"onnx"
     )
+    # RF-69 pide ids I3P-1: los de la versión de referencia, no los nombres del pipeline.
+    assert formulario["compatibilidad_variables"] == "[11, 12, 13]"
     assert backend.horas == 14 * 24
+    assert sys.modules[entrenamiento.MODULO_PIPELINE].dias_minimos == 7.0
+
+
+def test_en_dev_baja_los_dias_minimos_de_calibracion(monkeypatch):
+    _pipeline(monkeypatch)
+    backend = _Backend()
+    _reentrenador(backend, dias=2).ciclo()
+    assert sys.modules[entrenamiento.MODULO_PIPELINE].dias_minimos == 2.0
+    assert backend.reportes[-1]["estado"] == "COMPLETADO"
 
 
 def test_error_de_et02_cierra_fallido_con_su_codigo(monkeypatch):
@@ -174,7 +189,7 @@ def test_version_no_registrable_no_se_entrega(monkeypatch):
     assert registro.formularios == []
 
 
-def test_sin_el_pipeline_copiado_falla_sin_inventar(monkeypatch):
+def test_sin_el_pipeline_falla_sin_inventar(monkeypatch):
     monkeypatch.setitem(
         sys.modules, entrenamiento.MODULO_PIPELINE, None
     )  # ImportError al importarlo
@@ -195,8 +210,26 @@ def test_sin_pendientes_no_hace_nada():
     assert _reentrenador(_Backend(proceso=None)).ciclo() is False
 
 
-def test_subproceso_real_sin_pipeline_reporta_no_disponible():
-    """El camino por defecto (spawn): el hijo no encuentra el pipeline y lo dice por la cola."""
-    backend = _Backend()
+def test_subproceso_real_reporta_el_codigo_del_pipeline():
+    """El camino por defecto (spawn): el hijo corre el pipeline real y su código llega por la cola.
+
+    Con una lectura no hay calibración posible; sin el extra de entrenamiento, no hay pipeline.
+    """
+    backend = _Backend(
+        lecturas=(
+            {
+                "timestamp": "2026-11-01T12:00:00+00:00",
+                "variable": "frecuencia_cardiaca",
+                "valor": 70,
+                "apto_para_ia": True,
+            },
+        )
+    )
     Reentrenador(backend, _Registro(), latido_s=0.5).ciclo()
-    assert backend.reportes[-1]["codigo_error"] == "ENTRENAMIENTO_NO_DISPONIBLE"
+    try:
+        for paquete in ("xgboost", "sklearn", "imblearn", "onnxmltools", "onnxruntime"):
+            __import__(paquete)
+        esperado = "CALIBRACION_INCOMPLETA"
+    except ImportError:
+        esperado = "ENTRENAMIENTO_NO_DISPONIBLE"
+    assert backend.reportes[-1]["codigo_error"] == esperado

@@ -1,26 +1,26 @@
 # | Fecha      | Nombre   | Que se hizo |
 # |------------|----------|-------------|
 # | 2026-11-02 | Arekkazu | AJF-14 RF-71: adaptador del pipeline de entrenamiento de ET-02 v5 con reporte de fases |
-"""Adaptador entre el reentrenador y el pipeline de ENTRENAMIENTO de ET-02 v5.
+# | 2026-11-03 | Arekkazu | AJF-14 RF-71 P-6: usa el pipeline propio, con tipo de modelo y días mínimos |
+"""Adaptador entre el reentrenador y el pipeline (``motor_ia/entrenamiento_et02.py``).
 
-El pipeline vive en ``motor_ia/entrenamiento_et02.py``: una copia literal (solo definiciones) de
-``modelos_individuales_ET02_v5.py`` hecha como ``et02.py`` (tarea M-1 del plan AJF-14). Ese archivo
-**no está en este repositorio todavía**: lo genera el equipo IoT/IA desde su script (pendiente P-6).
-Mientras falte, ``entrenar`` lanza ``EntrenamientoNoDisponible`` y el proceso termina FALLIDO con
-``ENTRENAMIENTO_NO_DISPONIBLE``: no se inventan resultados.
+El pipeline entrena sobre el contrato de operación de ET-02 v5 (``et02.py``): mismas features,
+clases y formato ONNX con los que el motor infiere. Si sus dependencias (extra
+``[motor-ia-entrenamiento]``) no están en la imagen, ``entrenar`` lanza
+``EntrenamientoNoDisponible`` y el proceso termina FALLIDO con ``ENTRENAMIENTO_NO_DISPONIBLE``:
+no se inventan resultados.
 
 Fases que ve la pantalla (las informa ``al_avanzar``) y el paso de ``entrenar_modelo_individual``
-al que corresponden. Se reportan envolviendo las funciones del módulo copiado, sin editarlo:
+al que corresponden. Se reportan envolviendo las funciones del módulo:
 
   3 PREPROCESAMIENTO  calibrar_animal, generar_linea_temporal_sintetica (+ regla de retiro)
   4 ENTRENAMIENTO     entrenar_xgb_con_grilla (split, balanceo, grilla XGBoost)
   5 METRICAS          evaluar_criterios_aceptacion (controles antes de exportar)
   6 ENTREGA           exportar_onnx
 
-TODO(P-6, equipo IoT/IA): confirmar al generar ``entrenamiento_et02.py`` (1) la forma de
-``feat_real_etiquetado`` que espera el pipeline (aquí se pasan las retroalimentaciones del backend
-tal cual) y (2) lo que devuelve ``entrenar_modelo_individual`` (``_normalizar_salida`` acepta un
-dict con los metadatos RF-69 y el ONNX en bytes o en ruta). Si no coincide, solo cambia este archivo.
+``feat_real_etiquetado`` son las retroalimentaciones del backend tal cual
+(``GET /prediccion/motor/activos/{id}/retroalimentaciones``); el pipeline devuelve
+``{"metadatos_rf69": {...}, "onnx": bytes, "linea_base": {...}}``.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ class EntrenamientoNoDisponible(RuntimeError):
 
 
 class FalloEntrenamiento(RuntimeError):
-    """El pipeline abortó con su código (``ErrorEntrenamiento`` de ET-02: CALIBRACION_INCOMPLETA…)."""
+    """El pipeline abortó con su código (``ErrorEntrenamiento``: CALIBRACION_INCOMPLETA…)."""
 
     def __init__(self, codigo: str, mensaje: str = "") -> None:
         super().__init__(mensaje or codigo)
@@ -96,7 +96,12 @@ def _normalizar_salida(salida: Any) -> ResultadoEntrenamiento:
     return ResultadoEntrenamiento(metadatos=metadatos, onnx=onnx, motivos=motivos)
 
 
-def _envolver(modulo: Any, al_avanzar: Callable[[int], None]) -> None:
+#: Callback del entrenamiento en curso (uno a la vez por proceso). Las funciones envueltas lo leen
+#: al llamarse, así un segundo ``entrenar`` en el mismo proceso no reporta al callback anterior.
+_avance: dict[str, Callable[[int], None] | None] = {"al_avanzar": None}
+
+
+def _envolver(modulo: Any) -> None:
     for nombre, fase in FASE_DE_FUNCION.items():
         original = getattr(modulo, nombre, None)
         if original is None or getattr(original, "_ajf14_envuelta", False):
@@ -104,7 +109,8 @@ def _envolver(modulo: Any, al_avanzar: Callable[[int], None]) -> None:
 
         @functools.wraps(original)
         def envuelta(*args, __original=original, __fase=fase, **kwargs):
-            al_avanzar(__fase)
+            if _avance["al_avanzar"] is not None:
+                _avance["al_avanzar"](__fase)
             return __original(*args, **kwargs)
 
         envuelta._ajf14_envuelta = True  # type: ignore[attr-defined]
@@ -120,16 +126,22 @@ def entrenar(
     id_proceso: str,
     version_referencia: int | None,
     al_avanzar: Callable[[int], None],
+    tipo_modelo: str | None = None,
+    dias_minimos: float | None = None,
     modulo: str = MODULO_PIPELINE,
 ) -> ResultadoEntrenamiento:
-    """Corre ``entrenar_modelo_individual`` de ET-02 v5 (sin contrastes RF/MLP en v1)."""
+    """Corre ``entrenar_modelo_individual`` (sin contrastes RF/MLP en v1).
+
+    ``dias_minimos``: días de lecturas sanas que exige la calibración (None = los 7 de ET-02).
+    """
     try:
         pipeline = importlib.import_module(modulo)
     except ImportError as exc:
         raise EntrenamientoNoDisponible(
             f"No está el pipeline de entrenamiento ({modulo}): {exc}"
         ) from exc
-    _envolver(pipeline, al_avanzar)
+    _envolver(pipeline)
+    _avance["al_avanzar"] = al_avanzar
     try:
         salida = pipeline.entrenar_modelo_individual(
             id_animal=id_animal,
@@ -141,10 +153,18 @@ def entrenar(
             id_proceso_rf71=id_proceso,
             version_referencia=version_referencia,
             entrenar_contrastes=False,
+            tipo_modelo=tipo_modelo,
+            dias_minimos=dias_minimos,
         )
+    except ImportError as exc:  # el pipeline importa xgboost, sklearn… al usarlos
+        raise EntrenamientoNoDisponible(
+            f"Faltan dependencias del entrenamiento (extra motor-ia-entrenamiento): {exc}"
+        ) from exc
     except Exception as exc:  # noqa: BLE001 — el código de ET-02 viaja tal cual al backend
         codigo = _codigo_de(exc)
         if codigo:
             raise FalloEntrenamiento(codigo, str(exc)) from exc
         raise
+    finally:
+        _avance["al_avanzar"] = None
     return _normalizar_salida(salida)
