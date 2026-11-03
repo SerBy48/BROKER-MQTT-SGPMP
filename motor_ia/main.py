@@ -6,6 +6,7 @@
 # | 2026-10-31 | SerBy48  | RF-66: log visible bajo uvicorn y activo inválido no tumba lote  |
 # | 2026-10-31 | Arekkazu | RF-66: docstring con el prefijo /model-ia-test definido          |
 # | 2026-11-02 | Arekkazu | RF-66/RF-69: catálogo desde el backend con MOTOR_IA_SINCRONIZACION_S |
+# | 2026-11-02 | Arekkazu | AJF-14 RF-71: arranque del hilo reentrenador y su estado en healthz |
 """Motor de inferencia M04 (``motor-ia``): proceso aparte del gateway MQTT.
 
 Vive en este repo pero no comparte proceso con ``app``: una inferencia en CPU
@@ -29,6 +30,12 @@ Variables:
   ambiente cuyo backend aún no tiene ``/prediccion/motor`` sigue igual.
 - ``MOTOR_IA_CALIBRACION_HORAS``: horas de lecturas aptas para la línea base propia de un animal
   (168 = 7 días, el mínimo de ET-02). Solo con la sincronización.
+- ``MOTOR_IA_REENTRENAMIENTO_S`` (AJF-14): cada cuántos segundos el hilo reentrenador pide al
+  backend un reentrenamiento pendiente. ``0`` (por defecto) → apagado. Necesita ``BACKEND_URL`` y
+  ``MOTOR_IA_RF71_KEY`` (la misma ``X-RF71-Internal-Key`` del backend) y el extra
+  ``[motor-ia-entrenamiento]`` en la imagen.
+- ``MOTOR_IA_ENTRENAMIENTO_DIAS_CALIBRACION``: días de lecturas que baja para entrenar (14, el de
+  ET-02). Solo para DEV, donde los animales tienen horas; si se baja, el proceso lo anota en sus motivos.
 - ``MOTOR_IA_DIR_MODELOS``: carpeta con ``catalogo.json`` y los artefactos de ET-02
   (ver ``motor_ia.individual``). Vacía → sin modelos. Se ignora con la sincronización.
 
@@ -54,9 +61,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from motor_ia.backend import (
     BackendCatalogoClient,
     BackendNoDisponibleError,
+    BackendRegistroModelosClient,
     BackendResultadosClient,
 )
 from motor_ia.individual import a_resultado_rf66, cargar_catalogo, inferir
+from motor_ia.reentrenador import Reentrenador, reentrenar_siempre
 from motor_ia.sincronizacion import SincronizadorCatalogo
 
 logger = logging.getLogger(__name__)
@@ -72,6 +81,9 @@ class MotorIASettings(BaseSettings):
     backend_url: str = ""
     motor_ia_sincronizacion_s: int = 0
     motor_ia_calibracion_horas: float = 168.0
+    motor_ia_reentrenamiento_s: int = 0
+    motor_ia_rf71_key: str = ""
+    motor_ia_entrenamiento_dias_calibracion: float = 14.0
 
 
 class LotePaquetes(BaseModel):
@@ -110,6 +122,19 @@ def crear_app(
 
     def catalogo() -> dict:
         return sincronizador.modelos if sincronizador else modelos
+
+    reentrenador = None
+    if settings.motor_ia_reentrenamiento_s > 0:
+        # AJF-14: hilo aparte; un entrenamiento corre en su propio subproceso con prioridad baja.
+        if not settings.backend_url or not settings.motor_ia_rf71_key:
+            raise RuntimeError("El reentrenador necesita BACKEND_URL y MOTOR_IA_RF71_KEY.")
+        reentrenador = Reentrenador(
+            BackendCatalogoClient(settings.backend_url, settings.iot_inferencia_m04_token, transport_backend),
+            BackendRegistroModelosClient(settings.backend_url, settings.motor_ia_rf71_key, transport_backend),
+            dias_calibracion=settings.motor_ia_entrenamiento_dias_calibracion,
+        )
+        reentrenar_siempre(reentrenador, settings.motor_ia_reentrenamiento_s)
+        logger.info("RF-71: reentrenador activo, revisa pendientes cada %d s", settings.motor_ia_reentrenamiento_s)
 
     backend = None
     if modelos or sincronizador:
@@ -160,6 +185,8 @@ def crear_app(
             "modelos_cargados": len(catalogo()),
             "backend": backend.url if backend else None,
         }
+        if reentrenador:
+            estado["reentrenador"] = {"ocupado": reentrenador.ocupado}
         if sincronizador:
             estado["sincronizacion"] = {
                 "ultima": sincronizador.ultima.isoformat() if sincronizador.ultima else None,
