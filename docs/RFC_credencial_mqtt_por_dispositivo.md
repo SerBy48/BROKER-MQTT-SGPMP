@@ -192,7 +192,7 @@ el DBA):
 | Comando del gateway a un dispositivo que el Edge no atiende | No le llega al Edge |
 | Rotar la credencial | La clave vieja queda rechazada |
 | `disableClient` con el Edge conectado | Desconectado al instante; no puede reconectar |
-| Credencial compartida legacy | Sigue publicando; su `SUBSCRIBE #` ahora también se deniega |
+| Credencial compartida legacy | Sigue publicando; su `SUBSCRIBE #` y `sgpmp/+/command` se deniegan y solo abre los seriales cuya conexión aún no tiene credencial propia (#62) |
 
 Se reproduce con `scripts/e2e_credenciales_mqtt.py` (gateway real contra el
 broker del docker-compose, 25 verificaciones, incluida la sincronización sin

@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-21 | Arekkazu | SEG-BROKER-03 #62 RF-23: legacy solo abre seriales sin credencial |
 """Credenciales MQTT del Gateway Edge en dynamic-security (SEG-BROKER-03, TC-M09-250/251).
 
 Modelo (ver docs/RFC_credencial_mqtt_por_dispositivo.md):
@@ -14,7 +17,9 @@ Modelo (ver docs/RFC_credencial_mqtt_por_dispositivo.md):
 - Rol ``gateway`` para publicar comandos; el resto lo da el rol ``admin`` que
   crea ``mosquitto_ctrl dynsec init`` para MQTT_USERNAME (ver el entrypoint).
 - Rol ``dispositivos_legacy``: la ACL de la credencial compartida MQTT_DEVICE_*,
-  solo mientras los Edge migran.
+  solo mientras los Edge migran. Abre únicamente los seriales activos cuya conexión
+  (su Edge, o el propio si se conecta directo) aún no tiene credencial propia, con
+  topics literales: nunca ``+`` (#62). Con el último Edge migrado queda sin permisos.
 
 La BD manda: cada vez que el gateway conecta (``sincronizar``) se deshabilitan
 las credenciales de seriales inactivos o que pasaron a depender de un Edge, se
@@ -111,6 +116,27 @@ def _acls_dispositivo(settings: Settings, serial: str, suscripcion: str) -> list
         *(_acl(suscripcion, t) for t in recibidos),
         *(_acl("publishClientReceive", t) for t in recibidos),
     ]
+
+
+def _seriales_legacy(mapa: dict[str, EstadoDispositivo], clientes: dict[str, dict]) -> list[str]:
+    """Seriales que la credencial compartida todavía puede tocar (#62).
+
+    Activos cuya conexión (el Edge que los atiende, o ellos mismos) no tiene
+    credencial propia en dynsec, habilitada o revocada: una revocada no vuelve a
+    quedar al alcance de la compartida. Un serial con '+', '#' o '/' no entra.
+    """
+    con_credencial = {u for u, c in clientes.items() if ROL_LEGACY not in _roles_de(c)}
+    return sorted(
+        s
+        for s, e in mapa.items()
+        if e.activo
+        and (e.serial_gateway or s) not in con_credencial
+        and re.fullmatch(PATRON_SERIAL, s)
+    )
+
+
+def _acls_legacy(settings: Settings, seriales: list[str]) -> list[dict]:
+    return [a for s in seriales for a in _acls_dispositivo(settings, s, "subscribeLiteral")]
 
 
 def _rol_de_serial(settings: Settings, serial: str) -> dict:
@@ -215,13 +241,6 @@ async def sincronizar() -> None:
     settings = get_settings()
     p = settings.mqtt_topic_prefix
     legacy = bool(settings.mqtt_device_username and settings.mqtt_device_password)
-    roles_deseados = {
-        ROL_GATEWAY: [
-            _acl("publishClientSend", f"{p}/+/{t}") for t in _topics_hacia_el_nodo(settings)
-        ]
-    }
-    if legacy:
-        roles_deseados[ROL_LEGACY] = _acls_dispositivo(settings, "+", "subscribePattern")
 
     lista_clientes, lista_roles = await dynsec.ejecutar(
         [{"command": "listClients", "verbose": True}, {"command": "listRoles", "verbose": True}]
@@ -229,6 +248,18 @@ async def sincronizar() -> None:
     _verificar([lista_clientes, lista_roles])
     clientes = {c["username"]: c for c in lista_clientes["data"]["clients"]}
     roles = {r["rolename"]: r for r in lista_roles["data"]["roles"]}
+    mapa = await _mapa()  # la BD manda
+
+    roles_deseados = {
+        ROL_GATEWAY: [
+            _acl("publishClientSend", f"{p}/+/{t}") for t in _topics_hacia_el_nodo(settings)
+        ]
+    }
+    if legacy:
+        # ponytail: se recalcula al conectar el gateway; un serial recién migrado sigue
+        # en el rol legacy hasta la próxima sincronización. Si importa, llamar a
+        # sincronizar() desde emitir().
+        roles_deseados[ROL_LEGACY] = _acls_legacy(settings, _seriales_legacy(mapa, clientes))
 
     comandos = []
     for nombre, acls in roles_deseados.items():
@@ -264,8 +295,6 @@ async def sincronizar() -> None:
             }
         )
 
-    # La BD manda.
-    mapa = await _mapa()
     activos = {serial for serial, estado in mapa.items() if estado.activo}
     roles_existentes = set(roles)
     for usuario, cliente in clientes.items():
