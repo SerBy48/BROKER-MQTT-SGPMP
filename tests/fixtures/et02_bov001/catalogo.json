@@ -1,0 +1,11 @@
+{
+  "modelos": [
+    {
+      "id_activo_biologico": 885,
+      "id_version_modelo": 12,
+      "onnx": "BOV-001.onnx",
+      "linea_base": "BOV-001_linea_base.json",
+      "metadatos": "BOV-001_metadatos_rf69.json"
+    }
+  ]
+}

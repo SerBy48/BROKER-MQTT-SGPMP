@@ -43,6 +43,7 @@ from app.db.repositories import registry
 from app.db.repositories.registry import EstadoDispositivo
 from app.mqtt import dynsec, presencia
 from app.schemas import PATRON_SERIAL
+from app.services.reenvio_nodo import EVENTOS_OTA_NODO, OTA_NOTIFY
 
 logger = logging.getLogger(__name__)
 
@@ -78,18 +79,37 @@ def _acl(tipo: str, topic: str) -> dict:
     return {"acltype": tipo, "topic": topic, "allow": True}
 
 
-def _acls_dispositivo(settings: Settings, serial: str, suscripcion: str) -> list[dict]:
-    p = settings.mqtt_topic_prefix
-    comando = f"{p}/{serial}/{settings.mqtt_topic_command}"
-    propios = (
+def _topics_hacia_el_nodo(settings: Settings) -> tuple[str, ...]:
+    """Lo que el broker publica al nodo: comandos, el resultado de la ingesta (BRK-01)
+    y el aviso de OTA (BRK-08)."""
+    return (
+        settings.mqtt_topic_command,
+        settings.mqtt_topic_resultado,
+        f"{settings.mqtt_topic_ota}/{OTA_NOTIFY}",
+    )
+
+
+def _topics_desde_el_nodo(settings: Settings) -> tuple[str, ...]:
+    """Lo que el nodo publica. Los reportes OTA van uno por uno, sin comodín: el nodo
+    no puede publicar en `ota/notify` ni en un `ota/<evento>` fuera del contrato (D6)."""
+    return (
         settings.mqtt_topic_telemetry,
         settings.mqtt_topic_heartbeat,
         settings.mqtt_topic_status,
+        settings.mqtt_topic_vision,  # BRK-03
+        settings.mqtt_topic_evento,  # BRK-04
+        *(f"{settings.mqtt_topic_ota}/{e}" for e in EVENTOS_OTA_NODO),  # BRK-08
     )
+
+
+def _acls_dispositivo(settings: Settings, serial: str, suscripcion: str) -> list[dict]:
+    p = settings.mqtt_topic_prefix
+    propios = _topics_desde_el_nodo(settings)
+    recibidos = [f"{p}/{serial}/{t}" for t in _topics_hacia_el_nodo(settings)]
     return [
         *(_acl("publishClientSend", f"{p}/{serial}/{t}") for t in propios),
-        _acl(suscripcion, comando),
-        _acl("publishClientReceive", comando),
+        *(_acl(suscripcion, t) for t in recibidos),
+        *(_acl("publishClientReceive", t) for t in recibidos),
     ]
 
 
@@ -196,7 +216,9 @@ async def sincronizar() -> None:
     p = settings.mqtt_topic_prefix
     legacy = bool(settings.mqtt_device_username and settings.mqtt_device_password)
     roles_deseados = {
-        ROL_GATEWAY: [_acl("publishClientSend", f"{p}/+/{settings.mqtt_topic_command}")]
+        ROL_GATEWAY: [
+            _acl("publishClientSend", f"{p}/+/{t}") for t in _topics_hacia_el_nodo(settings)
+        ]
     }
     if legacy:
         roles_deseados[ROL_LEGACY] = _acls_dispositivo(settings, "+", "subscribePattern")
@@ -265,12 +287,18 @@ async def sincronizar() -> None:
         )
         roles_existentes |= {c["rolename"] for c in alinear if c["command"] == "createRole"}
         comandos += alinear
-    for nombre in roles:
-        inactivo = nombre.startswith(_PREFIJO_ROL_SERIAL) and (
-            nombre.removeprefix(_PREFIJO_ROL_SERIAL) not in activos
-        )
+    for nombre, rol in roles.items():
+        serial = nombre.removeprefix(_PREFIJO_ROL_SERIAL)
+        inactivo = nombre.startswith(_PREFIJO_ROL_SERIAL) and serial not in activos
         if inactivo or (nombre == ROL_LEGACY and not legacy):
             comandos.append({"command": "deleteRole", "rolename": nombre})
+        elif nombre.startswith(_PREFIJO_ROL_SERIAL) and re.fullmatch(PATRON_SERIAL, serial):
+            # Un topic nuevo del contrato (p. ej. `resultado`, BRK-01) tiene que llegar
+            # también a los roles ya emitidos. modifyRole desconecta a quien tenga el
+            # rol: pasa una vez por cambio de contrato, y el Edge reconecta solo.
+            deseado = _rol_de_serial(settings, serial)
+            if _firma(rol.get("acls", [])) != _firma(deseado["acls"]):
+                comandos.append({"command": "modifyRole", **deseado})
 
     if comandos:
         _verificar(await dynsec.ejecutar(comandos), _YA_EXISTE | _NO_EXISTE)

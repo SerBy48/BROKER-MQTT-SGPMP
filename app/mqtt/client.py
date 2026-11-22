@@ -50,8 +50,11 @@ class MqttGateway:
             logger.exception("No se pudo sincronizar dynamic-security al conectar")
 
     async def run(self) -> None:
+        from app.mqtt.cola import cola_ingesta
         from app.mqtt.dynsec import TOPIC_RESPUESTA
-        from app.mqtt.handlers import handle_message
+
+        # BRK-09: el bucle solo parsea y encola por prioridad; los workers procesan.
+        cola_ingesta.iniciar()
 
         logger.debug(
             "Intentando conectar MQTT a %s:%s (client_id=%s, tls=%s)",
@@ -67,9 +70,13 @@ class MqttGateway:
                     await client.subscribe(self.settings.telemetry_topic, qos=1)
                     await client.subscribe(self.settings.heartbeat_topic, qos=1)
                     await client.subscribe(self.settings.status_topic, qos=1)
+                    await client.subscribe(self.settings.vision_topic, qos=1)
+                    await client.subscribe(self.settings.evento_topic, qos=1)
+                    await client.subscribe(self.settings.ota_topic, qos=1)
                     await client.subscribe(TOPIC_RESPUESTA, qos=1)
                     logger.info(
-                        "MQTT conectado y suscrito a %s/{telemetry,heartbeat,status}",
+                        "MQTT conectado y suscrito a %s/+/{telemetry,heartbeat,status,"
+                        "vision,evento,ota/+}",
                         self.settings.mqtt_topic_prefix,
                     )
                     self._sync_task = asyncio.create_task(self._sincronizar_credenciales())
@@ -80,7 +87,7 @@ class MqttGateway:
                             topic,
                             len(message.payload),
                         )
-                        await handle_message(topic, message.payload)
+                        await cola_ingesta.recibir(topic, message.payload)
             except aiomqtt.MqttError as exc:
                 self._client = None
                 logger.error(
@@ -107,6 +114,9 @@ class MqttGateway:
                 await self._task
             except asyncio.CancelledError:
                 pass
+        from app.mqtt.cola import cola_ingesta
+
+        await cola_ingesta.detener()
 
 
 mqtt_gateway = MqttGateway(get_settings())

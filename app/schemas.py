@@ -1,11 +1,15 @@
+# | Fecha      | Nombre   | Que se hizo                                                       |
+# |------------|----------|-------------------------------------------------------------------|
+# | 2026-10-29 | Arekkazu | TC-DIS-148 RF-54: el heartbeat acepta metricas_buffer del Edge    |
 """Modelos de datos (payloads MQTT y contratos de la API)."""
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, ValidationError, field_validator, model_validator
 
 from app.core.enums import (
     CategoriaVariable,
@@ -47,8 +51,44 @@ class TelemetryPayload(BaseModel):
 _ESTADOS_BUFFER = {"I": "I", "A": "A", "L": "L", "INACTIVO": "I", "ACTIVO": "A", "LLENO": "L"}
 
 
+logger = logging.getLogger(__name__)
+
+
+class MetricasBuffer(BaseModel):
+    """RF-54 (TC-DIS-148): ocupación del buffer del Edge, la usa el panel del backend.
+
+    Mismo contrato que `MetricasBufferDTO` del backend (`extra='forbid'`): el backend
+    lee `modulo3.heartbeats.json_metricas_buffer` con esas reglas y responde 500 si el
+    JSON guardado no las cumple, así que acá no se deja pasar nada distinto.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    capacidad_total: float = Field(gt=0, allow_inf_nan=False)
+    capacidad_utilizada: float = Field(ge=0, allow_inf_nan=False)
+    ultimo_timestamp_pendiente: datetime | None = None
+    politica_buffer_activa: Literal["POLITICA_RECHAZO", "POLITICA_SOBRESCRITURA"]
+
+    @model_validator(mode="after")
+    def _utilizada_dentro_del_total(self) -> MetricasBuffer:
+        if self.capacidad_utilizada > self.capacidad_total:
+            raise ValueError("capacidad_utilizada no puede superar capacidad_total")
+        return self
+
+
+class SensorOperativo(BaseModel):
+    # `sensor`: el mismo identificador que viaja en el campo `sensor` de la telemetría.
+    sensor: str = Field(min_length=1)
+    operativo: bool
+
+
 class HeartbeatPayload(BaseModel):
-    """Payload esperado en el topic `<prefix>/<serial>/heartbeat`."""
+    """Payload esperado en el topic `<prefix>/<serial>/heartbeat`.
+
+    `sensores_operativos` y `temperatura_dispositivo` son de D11 (AIOT-DEV-03,
+    BRK-07): opcionales, porque el firmware que aún no los manda debe seguir
+    funcionando, y solo se guardan si la BD ya tiene sus columnas (DB-03).
+    """
 
     tipo_mensaje: TipoMensajeIot = TipoMensajeIot.HEARTBEAT
     nivel_bateria_pct: float | None = None
@@ -60,6 +100,20 @@ class HeartbeatPayload(BaseModel):
     coordenadas: dict[str, Any] | None = None
     fecha_registro: datetime | None = None
     reloj_sincronizado: bool = False
+    sensores_operativos: list[SensorOperativo] | None = None
+    temperatura_dispositivo: float | None = Field(default=None, allow_inf_nan=False)  # °C
+    metricas_buffer: MetricasBuffer | None = None
+
+    @field_validator("metricas_buffer", mode="wrap")
+    @classmethod
+    def _metricas_invalidas_no_tumban_el_heartbeat(cls, valor, handler):
+        # Un reporte de buffer mal formado se descarta; el heartbeat (presencia,
+        # batería, pendientes) se guarda igual.
+        try:
+            return handler(valor)
+        except ValidationError as exc:
+            logger.warning("metricas_buffer inválidas, se descartan: %s", exc.errors(include_url=False))
+            return None
 
     @field_validator("estado_local_buffer")
     @classmethod
@@ -128,7 +182,63 @@ class UmbralCommandRequest(BaseModel):
     niveles: list[NivelUmbral] = Field(min_length=1)
 
 
-ComandoRequest = Annotated[CommandRequest | UmbralCommandRequest, Field(discriminator="origen")]
+# BRK-05 (D7 de AIOT-DEV-03): tres comandos nuevos por el mismo patrón de RF-17.
+# El broker fija el sobre (a qué nodo, qué versión, cómo se confirma); el
+# contenido de la regla y de la configuración del motor lo arma el backend
+# desde su tabla y lo interpreta el firmware, así que aquí viaja tal cual.
+
+
+class ReglaCompuestaCommandRequest(BaseModel):
+    """Regla compuesta de `modulo3.reglas_alertas` hacia un Gateway Edge (RF-55/RF-57).
+
+    El nodo la guarda junto a sus umbrales y la evalúa con prevalencia sobre la
+    regla simple (RF-57 E14/E15). `version_regla` deja que descarte una versión
+    más vieja que llegue tarde; `es_activa=False` le pide retirarla.
+    """
+
+    origen: Literal["regla_compuesta"]
+    serial: str
+    id_regla_alerta: int = Field(gt=0)
+    version_regla: int = Field(ge=1)
+    es_activa: bool = True
+    regla: dict[str, Any] = Field(min_length=1)
+
+
+class ConfigMotorCommandRequest(BaseModel):
+    """Configuración del motor de IA de `modulo4.configuraciones_motor_ia` (RF-65).
+
+    El nodo confirma con `ACK_CONFIG_MOTOR` y el `config_version` que quedó
+    activo; el backend lo compara con el suyo (`sincronizacion_nodos_edge`).
+    """
+
+    origen: Literal["config_motor"]
+    serial: str
+    tipo_modelo: str = Field(min_length=1)
+    config_version: int = Field(ge=1)
+    configuracion: dict[str, Any] = Field(min_length=1)
+
+
+class TipoModeloCommandRequest(BaseModel):
+    """`tipo_modelo_asignado` de un área (M09·RF-20, D-06).
+
+    El nodo reinicia su módulo de procesamiento con el esquema nuevo y conserva
+    la calibración activa.
+    """
+
+    origen: Literal["tipo_modelo"]
+    serial: str
+    id_infraestructura: int = Field(gt=0)
+    tipo_modelo_asignado: str = Field(min_length=1)
+
+
+ComandoRequest = Annotated[
+    CommandRequest
+    | UmbralCommandRequest
+    | ReglaCompuestaCommandRequest
+    | ConfigMotorCommandRequest
+    | TipoModeloCommandRequest,
+    Field(discriminator="origen"),
+]
 
 
 class CommandResponse(BaseModel):
@@ -136,12 +246,42 @@ class CommandResponse(BaseModel):
     topic: str | None = None
     estado: Literal["APLICADA", "PENDIENTE", "NO_CONF"] = "PENDIENTE"
     mensaje: str
+    # BRK-05: el `config_version` que el nodo informa en su ACK (CONFIG_MOTOR_IA).
+    # None en los demás comandos o si el ACK no lo trae.
+    config_version: int | None = None
 
 
 # Mismo allow-list que SerialDispositivo en sgpmp-backend. Además es una barrera
 # de seguridad acá: el serial termina dentro de nombres de rol y de topics de la
 # ACL de dynamic-security, donde un '#', '+' o '/' abriría permisos ajenos.
 PATRON_SERIAL = r"^[A-Za-z0-9_-]{1,50}$"
+
+
+class OtaNotifyRequest(BaseModel):
+    """Pedido del backend para avisar a un nodo de una OTA de modelo (BRK-08, D6 paso 3).
+
+    El nodo descarga el artefacto por HTTPS (`url_descarga`, firmada y temporal, con
+    `Range`), verifica `sha256` y `firma`, instala y reporta por `ota/<evento>`.
+    `parametros` lleva las reglas de la distribución (fragmento, reintentos, batería
+    mínima, ventana) tal como las define el backend; el broker no las interpreta.
+    """
+
+    serial: str = Field(pattern=PATRON_SERIAL)
+    id_despliegue_ota: int = Field(gt=0)
+    tipo_modelo: str = Field(min_length=1)
+    componente: str = Field(min_length=1)
+    version: str = Field(min_length=1)
+    url_descarga: HttpUrl
+    sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    firma: str | None = None
+    tamano_bytes: int | None = Field(default=None, gt=0)
+    parametros: dict[str, Any] = Field(default_factory=dict)
+
+
+class OtaNotifyResponse(BaseModel):
+    serial: str
+    topic: str
+    id_mensaje: str
 
 
 class CredencialResponse(BaseModel):

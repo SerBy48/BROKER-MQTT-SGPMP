@@ -70,6 +70,8 @@ de cambio (se actualiza el RF) **antes** de tocar código.
 
 - `app/api/` — solo HTTPS, no toca MQTT ni BD directamente.
 - `app/mqtt/` — solo MQTT, no toca BD.
+- `app/backend/` — solo HTTP saliente hacia sgpmp-backend (token de servicio), no
+  toca MQTT ni BD.
 - `app/services/` — orquesta, llama a `repositories` y `publisher`.
 - `app/db/repositories/` — acceso a datos (SPs y consultas).
 - `app/core/` — logging, errores, enums.

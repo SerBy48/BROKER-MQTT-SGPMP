@@ -41,6 +41,17 @@ class Settings(BaseSettings):
     mqtt_topic_heartbeat: str = "heartbeat"
     mqtt_topic_command: str = "command"
     mqtt_topic_status: str = "status"
+    # BRK-01 (D2 de AIOT-DEV-03): aviso al nodo del resultado de cada ingesta de
+    # telemetría, para que libere o retenga su buffer. Topic propio (broker -> nodo):
+    # el firmware actual trata todo `command` sin tipo_comando como configuración
+    # RF-23. Formato propuesto por Desarrollo; AIoT lo confirma en FW-01.
+    mqtt_topic_resultado: str = "resultado"
+    # D4/D5/D6 de AIOT-DEV-03 (nodo -> broker -> endpoint interno del backend):
+    # vector de visión (BRK-03), eventos Edge de RF-55 (BRK-04) y OTA de modelos
+    # (BRK-08: `ota/notify` broker -> nodo, `ota/<evento>` nodo -> broker).
+    mqtt_topic_vision: str = "vision"
+    mqtt_topic_evento: str = "evento"
+    mqtt_topic_ota: str = "ota"
 
     # RF-23: segundos que /v1/commands espera el ACK del dispositivo antes
     # de responder NO_CONF.
@@ -52,6 +63,20 @@ class Settings(BaseSettings):
     # ignora siempre. Pasar a True cuando IoT confirme que ya lo devuelve: así
     # un ACK capturado y reenviado (o forjado sin id) deja de resolver comandos.
     mqtt_ack_requiere_id_comando: bool = False
+
+    # BRK-09 (RF-53 E15): cola de prioridad entre el bucle MQTT y el procesamiento.
+    # Con `capacidad` mensajes en espera se rechazan los NORMAL; con el doble, también
+    # los CRITICO; los de CONTROL nunca. `workers` procesan en paralelo (acotado por el
+    # pool de la BD: 5 + 10 de desborde por defecto en SQLAlchemy).
+    mqtt_cola_capacidad: int = 1000
+    mqtt_cola_workers: int = 4
+
+    # BRK-02 (P3 de AIOT-DEV-03): cliente HTTP broker -> sgpmp-backend para los
+    # eventos de control de bajo volumen (buffer, visión, eventos Edge, OTA). El
+    # token es el mismo BROKER_SERVICE_TOKEN del backend; va solo en el entorno.
+    backend_url: str = ""
+    broker_service_token: str = ""
+    backend_timeout_seconds: float = 10.0
 
     # API HTTPS (0.0.0.0 requerido dentro de contenedor Docker)
     api_host: str = "0.0.0.0"  # nosec B104
@@ -68,6 +93,18 @@ class Settings(BaseSettings):
     @property
     def status_topic(self) -> str:
         return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_status}"
+
+    @property
+    def vision_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_vision}"
+
+    @property
+    def evento_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_evento}"
+
+    @property
+    def ota_topic(self) -> str:
+        return f"{self.mqtt_topic_prefix}/+/{self.mqtt_topic_ota}/+"
 
 
 @lru_cache

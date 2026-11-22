@@ -18,7 +18,14 @@ from app.core.errors import DeviceNotFoundError, MqttNotConnectedError
 from app.db.engine import async_session_factory
 from app.db.repositories import registry
 from app.mqtt import correlacion, publisher
-from app.schemas import CommandRequest, CommandResponse, UmbralCommandRequest
+from app.schemas import (
+    CommandRequest,
+    CommandResponse,
+    ConfigMotorCommandRequest,
+    ReglaCompuestaCommandRequest,
+    TipoModeloCommandRequest,
+    UmbralCommandRequest,
+)
 from app.services import credenciales_mqtt
 
 logger = logging.getLogger(__name__)
@@ -37,7 +44,16 @@ async def _sin_conexion(receptor: str) -> bool:
         return False
 
 
-def _cuerpo_comando(request: CommandRequest | UmbralCommandRequest) -> tuple[dict, str]:
+Comando = (
+    CommandRequest
+    | UmbralCommandRequest
+    | ReglaCompuestaCommandRequest
+    | ConfigMotorCommandRequest
+    | TipoModeloCommandRequest
+)
+
+
+def _cuerpo_comando(request: Comando) -> tuple[dict, str]:
     """Campos propios del comando según su `origen`, y el tipo de ACK que lo confirma.
 
     El comando de configuración (RF-23) se publica igual que antes, sin
@@ -60,6 +76,36 @@ def _cuerpo_comando(request: CommandRequest | UmbralCommandRequest) -> tuple[dic
             },
             correlacion.ACK_UMBRAL,
         )
+    if isinstance(request, ReglaCompuestaCommandRequest):
+        return (
+            {
+                "tipo_comando": "REGLA_COMPUESTA",
+                "id_regla_alerta": request.id_regla_alerta,
+                "version_regla": request.version_regla,
+                "es_activa": request.es_activa,
+                "regla": request.regla,
+            },
+            correlacion.ACK_REGLA,
+        )
+    if isinstance(request, ConfigMotorCommandRequest):
+        return (
+            {
+                "tipo_comando": "CONFIG_MOTOR_IA",
+                "tipo_modelo": request.tipo_modelo,
+                "config_version": request.config_version,
+                "configuracion": request.configuracion,
+            },
+            correlacion.ACK_CONFIG_MOTOR,
+        )
+    if isinstance(request, TipoModeloCommandRequest):
+        return (
+            {
+                "tipo_comando": "TIPO_MODELO_ASIGNADO",
+                "id_infraestructura": request.id_infraestructura,
+                "tipo_modelo_asignado": request.tipo_modelo_asignado,
+            },
+            correlacion.ACK_TIPO_MODELO,
+        )
     if request.fps is not None:
         # Cámara (RF-23 v1.1): mismo comando y mismo ACK, solo cambia el parámetro.
         return {"fps": request.fps}, correlacion.ACK_CONFIGURACION
@@ -72,7 +118,13 @@ def _cuerpo_comando(request: CommandRequest | UmbralCommandRequest) -> tuple[dic
     )
 
 
-async def dispatch_command(request: CommandRequest | UmbralCommandRequest) -> CommandResponse:
+def _config_version(ack: dict | None) -> int | None:
+    valor = (ack or {}).get("config_version")
+    # bool es int en Python: un `true` no es una versión.
+    return valor if isinstance(valor, int) and not isinstance(valor, bool) else None
+
+
+async def dispatch_command(request: Comando) -> CommandResponse:
     logger.debug("Despachando comando: serial=%s", request.serial)
     async with async_session_factory() as session:
         device_id = await registry.resolve_device_id(session, request.serial)
@@ -137,13 +189,14 @@ async def dispatch_command(request: CommandRequest | UmbralCommandRequest) -> Co
         )
 
     try:
-        await asyncio.wait_for(future, timeout=settings.mqtt_ack_timeout_seconds)
+        ack = await asyncio.wait_for(future, timeout=settings.mqtt_ack_timeout_seconds)
         logger.info("ACK recibido de %s dentro del timeout.", request.serial)
         return CommandResponse(
             serial=request.serial,
             topic=topic,
             estado="APLICADA",
             mensaje="El dispositivo confirmó la recepción de la configuración.",
+            config_version=_config_version(ack),
         )
     except TimeoutError:
         logger.error("Sin ACK de %s tras %ss.", request.serial, settings.mqtt_ack_timeout_seconds)
