@@ -1,3 +1,44 @@
+## [0.4.0](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.3.0...v0.4.0) (2026-11-22)
+
+### Features
+
+* **motor-ia:** el motor arma su catálogo desde el backend y calibra solo a cada animal ([6d81179](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/6d8117997abd640d678923fbbc9bdb5f99bf8230))
+* **motor-ia:** RF-66 artefactos de ET-02 en la imagen y catalogo.json por File Mount ([d54b4bf](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/d54b4bfedf316e6164cef49e2456f12c33214931))
+* **motor-ia:** RF-66 artefactos de ET-02 TER-001 en la imagen ([fe24f0a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/fe24f0aea1ceb0103995cd6025ae57e6d065aa74))
+* **prod:** agregar .env.prod.example con el catalogo de variables de PROD ([af9da57](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/af9da57ab35d3e71af768a83c1f5ff39a5c70415))
+* **prod:** agregar docker-compose.prod.yml del broker AIoT ([55a8bd9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/55a8bd906a1ea1b41f337b30ec0fc66fac274ace))
+* **rf-53:** la captura de la cámara se reenvía aparte del sobre de visión D4 ([962353d](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/962353db848ac1e4aede1129f61416ab03fc09c2))
+* **rf-71:** hilo reentrenador del motor de ia que reporta fases al backend ([b5ba41c](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b5ba41c3e040e6d58e2854b73c63c3f4b7384219))
+* **rf-71:** pipeline de entrenamiento del modelo individual en el motor de ia ([a736c8e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a736c8e1b94a8dd80292bfe9f0eb59321e7c1834))
+* **rf17-motor-ia:** el modelo individual usa los rangos de M09 que manda el backend ([a749b97](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a749b971407eb70cc86258a3b4595ef595c554b7))
+* **rf53:** cliente HTTP del broker hacia el backend con token de servicio (BRK-02) ([9ded469](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/9ded46944a545fc2838b5515d5dd9bf96c5b2281))
+* **rf53:** cola de prioridad y definicion de dato critico bajo saturacion (BRK-09) ([412ae28](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/412ae28d2491d28aafcd5a411ec4d8a2063a06bb))
+* **rf53:** estado real de la ingesta en transmisiones_mqtt y aviso de resultado al nodo (BRK-01) ([4328c9e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/4328c9e59ab4b115c95099c2470154cfcfbfb5dc))
+* **rf53:** prioridad compuesta de RFC-016 con severidad calculada en el broker (BRK-11) ([7375f92](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/7375f92fc83988194e60ea882cff08fe62983796))
+* **rf53:** topicos vision, evento y ota del nodo con su ACL y reenvio al backend (BRK-03, BRK-04, BRK-08) ([a90cda6](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a90cda6aa5691e6bcd2903c89ed5336f4eb32d83))
+* **rf54-heartbeat:** guardar metricas_buffer del Edge en json_metricas_buffer (TC-DIS-148) ([acbf96f](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/acbf96f084f6e969499256ceeddcf6a808ea2bcc))
+* **rf54:** reenviar EVENTO_BUFFER del status al backend (BRK-06) ([320f93e](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/320f93e5b261ced3cc5d0ce479eb453ea4b79f5e))
+* **rf55:** comandos REGLA_COMPUESTA, CONFIG_MOTOR_IA y TIPO_MODELO_ASIGNADO hacia el nodo (BRK-05) ([464c05b](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/464c05b3aaf1941417e5943ab8d3a246ff9c0c7e))
+* **rf55:** resolver device_id y sensor_id por variable en el reenvio de eventos (BRK-12) ([da008a2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/da008a28c040d464cff246ee8f1161b7c296c07b))
+* **rf60:** heartbeat con sensores_operativos y temperatura_dispositivo (BRK-07) ([b769fde](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b769fdea81b49c0ca06523820e7e4ccb133cc808))
+* **rf66:** el motor infiere con el modelo individual ET-02 y entrega los resultados al backend ([0d28d7d](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/0d28d7dc36d380f56842a5791ca3d3465ab42e4a))
+* **rf66:** esqueleto del motor de inferencia M04 (motor-ia) como servicio aparte ([35e7390](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/35e7390c3935e327eba0cc6553e8c33dac77c34f))
+* **rf70:** endpoint para que el backend pida el aviso de OTA a un nodo (BRK-08) ([a7e563c](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a7e563c42908c289becfbe970275f8d5c69ed71e))
+
+### Bug Fixes
+
+* **motor-ia:** imagen que construye, puerto 8000 y arranque sin catálogo ([789eb7b](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/789eb7ba1b87ea1c15b1d48b708c29bd95e5a700))
+* **motor-ia:** RF-66 respeta el puerto 8100 y los prefijos /model-ia-* del despliegue ([3fe7839](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/3fe78394acf447c227aa578b8bb24b7352dd3fec)), closes [#49](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/49)
+* **prod:** alinear el compose de PROD con develop: dynamic-security, TLS y backend (BRK-10) ([bb8fc19](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/bb8fc19dcbbd1942e5b930927d50e07f523210aa))
+* **rf17-motor-ia:** resolver cada banda por separado y no usar valor_min-valor_max como plausible ([1a8e633](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/1a8e6334c3b37fa89145bcbf35e45cd89bc8f79a))
+* **rf23:** evento con `sensor` inexistente se descarta como la telemetría ([40b2271](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/40b22710ca434d8f126d9162f1c5a82bd830b9c6))
+* **rf23:** la lectura sin `sensor` ya no cae en el primer sensor del dispositivo ([25021ec](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/25021ec02d5de2b2d7a8def0320937abcba170a5))
+* **rf53:** avisar al arrancar si falta BACKEND_URL o BROKER_SERVICE_TOKEN (BRK-02) ([f4d480a](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/f4d480a4e2c8cc1b4b785dcad7d5c7e1c91b4dcc))
+* **rf53:** declarar el usuario de servicio en cada transacción bajo FORCE RLS ([a92e054](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/a92e054d224edde7329dbb231c1a5ba536aed624)), closes [#808](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/808)
+* **rf53:** severidad con las bandas excluyentes de RF-17 y catalogo en tarea de fondo (BRK-11) ([81e69a9](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/81e69a97762fe1a7100958bd679e08e2a84970e6))
+* **rf55:** sensor_id raiz del evento cuando las lecturas LoRa no traen sensor (BRK-12) ([2d91906](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/2d919067f97ba5fb5407991fdbf1dd7482ae7007))
+* **rf66:** no perder paquetes por ruta o proxy y dejar rastro cuando no hay resultado ([b372217](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/b372217444e67489856fcd2200c163310ebfbc69))
+
 ## [0.4.0-rc.19](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0-rc.18...v0.4.0-rc.19) (2026-11-03)
 
 ### Features
