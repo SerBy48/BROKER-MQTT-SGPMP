@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-21 | Arekkazu | SEG-BROKER-03 #62 RF-23: rol legacy acotado |
 """SEG-BROKER-03 (TC-M09-250/251): credencial MQTT del Gateway Edge en dynamic-security.
 
 Con dobles para la BD y para Mosquitto: se verifica QUÉ comandos de
@@ -283,11 +286,12 @@ def _estado(clientes: list[dict], roles: list[dict]) -> dict[str, dict]:
     }
 
 
-def _legacy(monkeypatch) -> list[dict]:
+def _legacy(monkeypatch, *seriales: str) -> list[dict]:
+    """Activa la credencial compartida; devuelve las ACL de su rol para `seriales`."""
     monkeypatch.setenv("MQTT_DEVICE_USERNAME", "sgpmp_devices")
     monkeypatch.setenv("MQTT_DEVICE_PASSWORD", "clave-legacy")
     get_settings.cache_clear()
-    return cm._acls_dispositivo(get_settings(), "+", "subscribePattern")
+    return cm._acls_legacy(get_settings(), list(seriales))
 
 
 def _rol_serial(nombre: str) -> dict:
@@ -318,7 +322,7 @@ async def test_primer_arranque_el_gateway_se_asigna_su_rol_y_espera_la_reconexio
 async def test_en_regimen_no_reescribe_nada_que_ya_este_bien(falso, monkeypatch) -> None:
     """modifyClient/modifyRole desconectan aunque no cambie nada (Mosquitto 2.1.2):
     reescribir en cada conexión expulsaría al gateway y a los Edge."""
-    legacy_acls = _legacy(monkeypatch)
+    legacy_acls = _legacy(monkeypatch, "SUELTO")  # EDGE-1 ya migró: solo queda SUELTO
     legacy = {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]}
     falso.datos = _estado(
         [GATEWAY, legacy, _edge("EDGE-1", "ESP-1", "ESP-2")],
@@ -395,6 +399,56 @@ async def test_legacy_se_crea_si_falta_pero_su_clave_no_se_rota_en_caliente(
         }
     ]
     assert falso.de("modifyClient") == []
+
+
+LEGACY = {"username": "sgpmp_devices", "roles": [{"rolename": "dispositivos_legacy"}]}
+
+
+def _rol_legacy_escrito(falso: DynsecFalso) -> list[dict]:
+    (rol,) = [c for c in falso.de("createRole") + falso.de("modifyRole")
+              if c["rolename"] == "dispositivos_legacy"]
+    return rol["acls"]
+
+
+async def test_legacy_no_usa_comodines_ni_abre_seriales_ajenos(falso, monkeypatch) -> None:
+    """#62: con `+` la credencial compartida leía el `command` y el `ota/notify` de
+    cualquier serial. Ahora solo los seriales activos que aún no migraron, literales."""
+    _legacy(monkeypatch)
+    falso.datos = _estado([GATEWAY, LEGACY], _base())
+
+    await cm.sincronizar()
+
+    acls = _rol_legacy_escrito(falso)
+    assert not any("+" in a["topic"] or "#" in a["topic"] for a in acls)
+    assert {a["acltype"] for a in acls} == {
+        "publishClientSend", "subscribeLiteral", "publishClientReceive"}
+    seriales = {a["topic"].split("/")[1] for a in acls}
+    assert seriales == {"EDGE-1", "ESP-1", "ESP-2", "SUELTO"}  # ni ESP-3 ni VIEJO (inactivos)
+
+
+async def test_legacy_suelta_los_seriales_que_ya_tienen_credencial_propia(
+    falso, monkeypatch
+) -> None:
+    _legacy(monkeypatch, "EDGE-1", "ESP-1", "ESP-2", "SUELTO")  # el rol tal como estaba
+    falso.datos = _estado(
+        [GATEWAY, LEGACY, _edge("EDGE-1", "ESP-1", "ESP-2"),
+         {"username": "SUELTO", "roles": [{"rolename": "serial-SUELTO"}], "disabled": True}],
+        [*_base("serial-EDGE-1", "serial-ESP-1", "serial-ESP-2", "serial-SUELTO"),
+         _rol("dispositivos_legacy",
+              cm._acls_legacy(get_settings(), ["EDGE-1", "ESP-1", "ESP-2", "SUELTO"]))],
+    )
+
+    await cm.sincronizar()
+
+    # EDGE-1 migró (y con él ESP-1/ESP-2); SUELTO fue revocado: tampoco vuelve a la compartida
+    assert _rol_legacy_escrito(falso) == []
+    assert falso.de("modifyRole") == [
+        {"command": "modifyRole", "rolename": "dispositivos_legacy", "acls": []}]
+
+
+def test_legacy_omite_seriales_con_comodines(bd) -> None:
+    bd["RARO+/#"] = E(True, None)
+    assert "RARO+/#" not in cm._seriales_legacy(bd, {})
 
 
 async def test_un_rol_con_acls_distintas_se_corrige(falso) -> None:

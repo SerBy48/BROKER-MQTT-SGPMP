@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-21 | Arekkazu | SEG-BROKER-03 #62 RF-23: legacy sin command ajeno |
 """E2E de SEG-BROKER-03 (TC-M09-250/251): gateway real contra Mosquitto real.
 
 Usa el cliente MQTT y el servicio de credenciales del gateway contra el broker
@@ -136,6 +139,14 @@ async def main() -> None:
         "failed" not in pub(lu, lp, f"sgpmp/{a1}/status"),
     )
     check("legacy: SUBSCRIBE '#' denegado", sub_denegado(lu, lp, "#") is True)
+    check(
+        "legacy (#62): SUBSCRIBE 'sgpmp/+/command' denegado",
+        sub_denegado(lu, lp, "sgpmp/+/command") is True,
+    )
+    check(
+        "legacy (#62): suscribe el command de un serial que aun no migra",
+        sub_denegado(lu, lp, f"sgpmp/{EDGE}/command") is False,
+    )
 
     # --- credencial del Edge ---
     cred = await cm.emitir(EDGE)
@@ -147,6 +158,11 @@ async def main() -> None:
     )
 
     check("TC-251: SUBSCRIBE '#' -> SUBACK de fallo", sub_denegado(u, p, "#") is True)
+    await cm.sincronizar()
+    check(
+        "legacy (#62): pierde el command del Edge que ya tiene credencial propia",
+        sub_denegado(lu, lp, f"sgpmp/{EDGE}/command") is True,
+    )
     check(
         "TC-251: SUBSCRIBE 'sgpmp/+/command' -> fallo",
         sub_denegado(u, p, "sgpmp/+/command") is True,
@@ -187,8 +203,9 @@ async def main() -> None:
     check("RF-23: el comando de su dispositivo le llega al Edge", "atendido" in salida)
     check("no recibe el comando de un dispositivo ajeno", "ajeno" not in salida)
 
-    # un Edge que aún usa la credencial compartida podría ser el que atiende: no se corta
-    legacy = escuchar(lu, lp, f"sgpmp/{a1}/command")
+    # un Edge que aún usa la credencial compartida podría ser el que atiende: no se corta.
+    # Se suscribe a un serial que aún no migra: los del Edge ya no los abre la legacy (#62).
+    legacy = escuchar(lu, lp, f"sgpmp/{DIRECTO}/command")
     await asyncio.sleep(0.7)
     check(
         "Edge apagado pero alguien en la credencial legacy: sin_conexion -> False",
