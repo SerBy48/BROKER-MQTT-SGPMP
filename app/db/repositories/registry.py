@@ -136,6 +136,9 @@ async def contexto_prioridad(session: AsyncSession) -> ContextoPrioridad:
     criticidad_por_area: dict[int, str] = dict(
         (
             await session.execute(
+                # avoid-sqlalchemy-text: falso positivo; solo interpola una de dos
+                # expresiones fijas del codigo, nunca datos externos.
+                # nosemgrep
                 text(f"SELECT id_infraestructura, {criticidad} FROM modulo9.infraestructuras")
             )
         ).all()
@@ -150,6 +153,8 @@ async def contexto_prioridad(session: AsyncSession) -> ContextoPrioridad:
             "WHERE id_especie IS NOT NULL"
         )
     result = await session.execute(
+        # Solo interpola una de dos subconsultas fijas del codigo, nunca datos externos.
+        # nosemgrep: python.sqlalchemy.security.audit.avoid-sqlalchemy-text.avoid-sqlalchemy-text
         text(
             "SELECT ae.id_infraestructura, va.nombre, u.id_umbral_ambiental, n.nivel::text, "
             "n.limite_inferior, n.limite_superior "
