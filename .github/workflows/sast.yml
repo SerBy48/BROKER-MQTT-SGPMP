@@ -53,6 +53,7 @@ jobs:
             --config "p/fastapi" \
             --config "p/jwt" \
             --severity ERROR \
+            --error \
             --sarif --sarif-output semgrep.sarif \
             app/ motor_ia/
 
@@ -62,7 +63,7 @@ jobs:
         with:
           name: semgrep-results
           path: semgrep.sarif
-          retention-days: 14
+          retention-days: 30
 
   bandit-sast:
     name: Bandit Python SAST Scan
@@ -101,4 +102,4 @@ jobs:
         with:
           name: bandit-report
           path: bandit-report.txt
-          retention-days: 14
+          retention-days: 30
