@@ -1,3 +1,9 @@
+## [0.4.1-rc.2](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.1-rc.1...v0.4.1-rc.2) (2026-11-23)
+
+### Bug Fixes
+
+* **docker:** incluir mosquitto.conf en la imagen y validarlo al arrancar ([3d68bce](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/3d68bce2176f6e06d340fddef7abf1ef8968d114))
+
 ## [0.4.1-rc.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0...v0.4.1-rc.1) (2026-11-22)
 
 ### Bug Fixes
