@@ -31,7 +31,7 @@ jobs:
 
     steps:
       - name: Checkout del código fuente
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configurar Python
         uses: actions/setup-python@v5
@@ -72,7 +72,7 @@ jobs:
 
     steps:
       - name: Checkout del código fuente
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Configurar Python
         uses: actions/setup-python@v5
