@@ -26,16 +26,16 @@ dependencies = [
 # fijadas de los entregables de ET-02 v5. El broker no los necesita.
 # numpy==2.5.3 exige Python 3.12 o superior: la imagen del motor usa 3.13 y el broker sigue en 3.11.
 motor-ia = [
-    "onnxruntime==1.29.0",
+    "onnxruntime==1.32.0",
     "numpy==2.5.3",
-    "pandas==3.0.5",
+    "pandas==3.1.1",
 ]
 # AJF-14 (RF-71): el reentrenador del motor. Versiones fijadas de ET-02 v5
 # (requirements_ET02_v5.txt); solo la imagen que reentrena las instala, encima de [motor-ia].
 motor-ia-entrenamiento = [
-    "onnxruntime==1.29.0",
+    "onnxruntime==1.32.0",
     "numpy==2.5.3",
-    "pandas==3.0.5",
+    "pandas==3.1.1",
     "xgboost==3.4.1",
     "scikit-learn==1.9.1",
     "imbalanced-learn==0.14.2",
