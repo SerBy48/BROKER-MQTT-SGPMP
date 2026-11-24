@@ -10,6 +10,13 @@
 
 * **docker:** incluir mosquitto.conf en la imagen y validarlo al arrancar ([3d68bce](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/3d68bce2176f6e06d340fddef7abf1ef8968d114))
 
+## [0.4.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0...v0.4.1) (2026-11-22)
+
+### Bug Fixes
+
+* **deps:** certifi 2026.11.20 por PYSEC-2026-4320 (SEG-SCA-01) ([ab950fb](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/ab950fb4c48ca12b5f4c8cef0867787fa3dae20a)), closes [#63](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/63)
+* **rf23:** la credencial legacy solo abre los seriales sin credencial propia (SEG-BROKER-03) ([0faab85](https://github.com/SerBy48/BROKER-MQTT-SGPMP/commit/0faab8541ad03e4d4b004490809b5fd75726a8a4)), closes [#62](https://github.com/SerBy48/BROKER-MQTT-SGPMP/issues/62)
+
 ## [0.4.1-rc.1](https://github.com/SerBy48/BROKER-MQTT-SGPMP/compare/v0.4.0...v0.4.1-rc.1) (2026-11-22)
 
 ### Bug Fixes
