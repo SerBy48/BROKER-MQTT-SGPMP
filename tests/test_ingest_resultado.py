@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: ERROR_SENSOR cuando la lectura no identifica su sensor |
 """BRK-01 (D2 de AIOT-DEV-03): `transmisiones_mqtt` refleja el resultado real de
 fn_ingesta_telemetria y el nodo recibe un aviso para liberar o retener su buffer."""
 
@@ -178,3 +181,27 @@ async def test_sin_mqtt_el_aviso_no_rompe_la_ingesta(monkeypatch) -> None:
     monkeypatch.setattr(ingest.publisher, "publish_resultado_ingesta", sin_conexion)
     r = await ingest.ingest_telemetry("EDGE-1", dict(LECTURA))
     assert r.estado == "EXITO" and bd.transmisiones[0]["estado"] == "EXITO"
+
+
+@pytest.mark.parametrize(
+    "sensor, causa",
+    [("SEN-NO-EXISTE", "no tiene un sensor llamado 'SEN-NO-EXISTE'"), (None, "Falta `sensor`")],
+    ids=["nombre-inexistente", "sin-nombre-y-varios-sensores"],
+)
+async def test_sensor_no_resuelto_es_error_sensor(monkeypatch, sensor, causa) -> None:
+    bd = _Bd(monkeypatch)
+
+    async def sin_sensor(_s, _device_id, _nombre=None):
+        return None
+
+    monkeypatch.setattr(ingest.registry, "resolve_sensor_id", sin_sensor)
+    lectura = {k: v for k, v in LECTURA.items() if k != "sensor"}
+    if sensor:
+        lectura["sensor"] = sensor
+
+    r = await ingest.ingest_telemetry("EDGE-1", lectura)
+
+    assert (r.estado, r.accion_buffer, r.codigo) == ("FALLIDO", "LIBERAR", "ERROR_SENSOR")
+    assert causa in r.mensaje
+    assert bd.transmisiones[0]["error_descripcion"] == r.mensaje
+    assert bd.avisos[0][1]["codigo"] == "ERROR_SENSOR"

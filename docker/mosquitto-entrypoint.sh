@@ -17,6 +17,20 @@
 # dejar el archivo con el owner/permisos correctos.
 set -e
 
+# La imagen trae su mosquitto.conf (Dockerfile.mosquitto), así que el broker siempre arranca con
+# autenticación aunque falte el volumen; y si se monta un conf que permite anónimos o no carga
+# dynamic-security, el arranque falla en vez de exponer el broker.
+CONF="/mosquitto/config/mosquitto.conf"
+if [ ! -f "$CONF" ]; then
+  echo "ERROR: falta $CONF — no se arranca un broker sin configuración (quedaría anónimo)." >&2
+  exit 1
+fi
+if grep -Eq '^[[:space:]]*allow_anonymous[[:space:]]+true' "$CONF" \
+   || ! grep -Eq '^[[:space:]]*plugin[[:space:]].*mosquitto_dynamic_security' "$CONF"; then
+  echo "ERROR: $CONF permite anónimos o no carga dynamic-security — no se arranca el broker." >&2
+  exit 1
+fi
+
 SECRETS_DIR="/mosquitto/secrets"
 DYNSEC_FILE="$SECRETS_DIR/dynamic-security.json"
 

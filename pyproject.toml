@@ -30,6 +30,18 @@ motor-ia = [
     "numpy==2.5.3",
     "pandas==3.0.5",
 ]
+# AJF-14 (RF-71): el reentrenador del motor. Versiones fijadas de ET-02 v5
+# (requirements_ET02_v5.txt); solo la imagen que reentrena las instala, encima de [motor-ia].
+motor-ia-entrenamiento = [
+    "onnxruntime==1.29.0",
+    "numpy==2.5.3",
+    "pandas==3.0.5",
+    "xgboost==3.4.1",
+    "scikit-learn==1.9.1",
+    "imbalanced-learn==0.14.2",
+    "onnx==1.23.2",
+    "onnxmltools==1.16.0",
+]
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",

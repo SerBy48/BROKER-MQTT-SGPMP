@@ -1,3 +1,6 @@
+# | Fecha      | Nombre   | Que se hizo |
+# |------------|----------|-------------|
+# | 2026-11-01 | Arekkazu | RF-23/RF-22: ERROR_SENSOR si la lectura no identifica su sensor |
 """Lógica de ingesta: recibe payloads MQTT y los persiste vía los SPs de la BD."""
 
 from __future__ import annotations
@@ -61,6 +64,15 @@ def _rechazo(codigo: str, mensaje: str) -> ResultadoIngesta:
     return ResultadoIngesta("FALLIDO", LIBERAR, codigo, f"{codigo}: {mensaje}")
 
 
+def _sensor_no_resuelto(sensor: str | None) -> str:
+    if sensor:
+        return f"El dispositivo no tiene un sensor llamado {sensor!r}."
+    return (
+        "Falta `sensor`: el dispositivo no tiene un único sensor activo; "
+        "envía el nombre del sensor registrado en la plataforma."
+    )
+
+
 def clasificar(fila: dict) -> ResultadoIngesta:
     """Traduce el retorno de fn_ingesta_telemetria a estado de transmisión y acción del nodo."""
     if fila["id_telemetria"] is not None:
@@ -100,9 +112,7 @@ async def _persistir(
                     "ERROR_ESTRUCTURA", f"Variable no registrada: {payload.variable}."
                 )
             elif sensor_id is None:
-                resultado = _rechazo(
-                    "ERROR_AUTENTICACION", f"Sensor no resuelto: {payload.sensor}."
-                )
+                resultado = _rechazo("ERROR_SENSOR", _sensor_no_resuelto(payload.sensor))
             else:
                 if payload.timestamp_envio is None:
                     payload = payload.model_copy(

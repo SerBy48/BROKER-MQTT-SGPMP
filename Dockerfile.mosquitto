@@ -2,6 +2,9 @@
 # (ver docker/mosquitto-entrypoint.sh) — necesario porque ese archivo está
 # gitignoreado y no existe en un clone nuevo (Dokploy incluido).
 FROM eclipse-mosquitto:2@sha256:6f8d8a947c506f8a2290ec65cd4bd2bc7cb4d43fb5f6271f861cb013e2ef9797
+# La configuración va dentro de la imagen; el volumen de docker-compose la sigue
+# reemplazando con el mismo archivo, y si falta no se usa la configuración de fábrica.
+COPY docker/mosquitto.conf /mosquitto/config/mosquitto.conf
 COPY docker/mosquitto-entrypoint.sh /mosquitto-entrypoint.sh
 RUN chmod +x /mosquitto-entrypoint.sh
 ENTRYPOINT ["/mosquitto-entrypoint.sh"]

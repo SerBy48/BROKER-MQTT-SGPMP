@@ -194,6 +194,26 @@ Telemetría (`.../telemetry`):
 }
 ```
 
+`variable` y `unidad` son el `nombre` y la `unidad` exactos de
+`modulo9.variables_ambientales` (`°C`, no `C`). `sensor` es el `nombre` del sensor
+registrado en la plataforma para ese dispositivo (único por dispositivo): es
+**obligatorio si el dispositivo tiene más de un sensor activo**, y conviene
+enviarlo siempre (registrar un segundo sensor no obliga a tocar el firmware).
+
+- Sin `sensor`: la lectura se guarda solo si el dispositivo tiene un único sensor
+  activo. Antes se tomaba el primer sensor activo y con varios la lectura quedaba
+  en el sensor equivocado.
+- Sin `sensor` y con varios sensores activos, o con un `sensor` que no existe en el
+  dispositivo: rechazo **definitivo** `ERROR_SENSOR`. El Edge actual no se suscribe a
+  `sgpmp/<serial>/resultado` y borra la lectura de su buffer con el PUBACK, así que
+  **esa lectura se pierde**: configurar el `sensor` antes de registrar un segundo
+  sensor en la plataforma, y registrarlo enseguida, porque hasta entonces las lecturas
+  que ya lo nombran también se rechazan. La causa queda en
+  `modulo3.transmisiones_mqtt.error_descripcion` (y en el aviso de `resultado`).
+- Con un único sensor, una lectura de otra variable (p. ej. humedad en un sensor de
+  temperatura) se sigue aceptando: el catálogo no relaciona sensor y variable, así
+  que el broker no puede detectarlo. Por eso cada variable va en su propio sensor.
+
 Heartbeat (`.../heartbeat`):
 
 ```json
@@ -287,10 +307,11 @@ broker los resuelve antes de reenviar:
   del dispositivo (una consulta por evento). Sin match, esa variable queda en
   `null`; nunca se cae al primer sensor activo.
 - `sensor_id`: el de la variable primaria (la primera de la lista); si no
-  resolvió, el de la primera que sí. Si ninguna resolvió (la lectura LoRa del
-  Gateway hoy no trae `sensor`), el de la misma regla que la ingesta de
-  telemetría, para apuntar al sensor donde quedó guardada la lectura. Un
-  dispositivo sin sensores se descarta.
+  resolvió, el de la primera que sí. Si ninguna variable trae `sensor`, el de la
+  misma regla que la ingesta de telemetría (solo si el dispositivo tiene un único
+  sensor activo). Si alguna trae `sensor` pero ninguno existe en el dispositivo, el
+  evento se descarta, igual que la telemetría: nunca se atribuye al sensor por
+  defecto. En ambos descartes queda un WARNING en el log del broker con la causa.
 - El mapa va en `metadata_edge.sensores_por_variable` (el backend descarta los
   campos extra de cada variable) junto a `device_id_resuelto`. Lo que trae el
   Edge en `metadata_edge` no se toca: ante colisión gana el Edge.
